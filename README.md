@@ -1,5 +1,11 @@
 # CPACodexKeeper
 
+[![CI](https://github.com/5345asda/CPACodexKeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/5345asda/CPACodexKeeper/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+
+[中文](README.md) | [English](README.en.md)
+
 CPACodexKeeper 是一个用于**巡检和维护 CPA 管理端中的 codex token** 的 Python 工具。
 
 它的目标不是生成 token，而是对**已经存储在 CPA 管理 API 中的 codex token** 做持续维护。

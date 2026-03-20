@@ -1,5 +1,11 @@
 # CPACodexKeeper
 
+[![CI](https://github.com/5345asda/CPACodexKeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/5345asda/CPACodexKeeper/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+
+[中文](README.md) | [English](README.en.md)
+
 CPACodexKeeper is a Python tool for **inspecting and maintaining codex tokens stored in a CPA management system**.
 
 It does not create tokens. Instead, it continuously maintains **existing codex tokens already stored in a CPA management API**.
