@@ -67,5 +67,5 @@ class TokenLogger:
 
     def flush(self) -> None:
         """一次性输出收集的所有日志。"""
-        self._logger.emit_lines(self._buffer)
+        self._logger.emit_lines(self._buffer.copy())
         self._buffer.clear()

@@ -24,6 +24,7 @@ def main() -> int:
 
     maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run)
     if args.daemon:
+        maintainer._start_tracked_rechecks()
         if settings.usage_query_interval_seconds > 0:
             fill_maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run)
             fill_thread = threading.Thread(

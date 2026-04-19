@@ -36,6 +36,8 @@ class CPACodexKeeper:
         self._state_lock = threading.Lock()
         self.disabled_accounts_path = Path(__file__).resolve().parents[1] / "disabled_accounts.json"
         self._tracked_disabled_accounts = self._load_disabled_accounts_state()
+        self._tracked_recheck_timers: dict[str, threading.Timer] = {}
+        self._tracked_rechecks_started = False
         self.last_usage_query_time: int | None = None
 
     def reset_stats(self):
@@ -130,6 +132,34 @@ class CPACodexKeeper:
         payload = json.dumps(self._tracked_disabled_accounts, ensure_ascii=False, indent=2, sort_keys=True)
         self.disabled_accounts_path.write_text(payload + "\n", encoding="utf-8")
 
+    def _cancel_tracked_recheck_timer(self, name):
+        timer = self._tracked_recheck_timers.pop(name, None)
+        if timer is not None:
+            timer.cancel()
+
+    def _schedule_tracked_recheck(self, name, ts):
+        self._cancel_tracked_recheck_timer(name)
+        delay_seconds = max(0, int(ts) - int(time.time()))
+        delay_seconds = min(delay_seconds, int(threading.TIMEOUT_MAX))
+        timer = threading.Timer(delay_seconds, self._run_tracked_recheck, args=(name,))
+        timer.daemon = True
+        self._tracked_recheck_timers[name] = timer
+        timer.start()
+
+    def _start_tracked_rechecks(self):
+        with self._state_lock:
+            if self._tracked_rechecks_started:
+                return
+            self._tracked_disabled_accounts = self._load_disabled_accounts_state()
+            self._tracked_rechecks_started = True
+            tracked_entries = list(self._tracked_disabled_accounts.items())
+        for name, entry in tracked_entries:
+            if not isinstance(entry, dict):
+                continue
+            next_check_at = entry.get("next_check_at")
+            if isinstance(next_check_at, int):
+                self._schedule_tracked_recheck(name, next_check_at)
+
     def _get_tracked_next_check_at(self, name):
         entry = self._tracked_disabled_accounts.get(name)
         if not isinstance(entry, dict):
@@ -145,15 +175,32 @@ class CPACodexKeeper:
             return str(ts)
 
     def _set_tracked_next_check_at(self, name, ts):
+        ts_int = int(ts)
         with self._state_lock:
-            self._tracked_disabled_accounts[name] = {"next_check_at": int(ts)}
+            self._tracked_disabled_accounts[name] = {"next_check_at": ts_int}
             self._save_disabled_accounts_state()
+        self._schedule_tracked_recheck(name, ts_int)
 
     def _remove_tracked_account(self, name):
         with self._state_lock:
             if name in self._tracked_disabled_accounts:
                 self._tracked_disabled_accounts.pop(name)
                 self._save_disabled_accounts_state()
+        self._cancel_tracked_recheck_timer(name)
+
+    def _run_tracked_recheck(self, name):
+        with self._state_lock:
+            if name not in self._tracked_disabled_accounts:
+                self._tracked_recheck_timers.pop(name, None)
+                return
+        self._tracked_recheck_timers.pop(name, None)
+        self.logger.emit_lines([
+            f"{self.logger.PREFIX_MAP['INFO']} 账号 {name} 到达计划复查时间，开始复查使用额度"
+        ])
+        try:
+            self.process_token({"name": name}, 1, 1)
+        except Exception as exc:
+            self.log("ERROR", f"账号 {name} 定时复查异常: {exc}")
 
     def _collect_threshold_reaching_reset_ats(self, body_info):
         reached_reset_ats = []
@@ -732,6 +779,7 @@ class CPACodexKeeper:
 
     def run_forever(self, interval_seconds=1800):
         round_no = 0
+        self._start_tracked_rechecks()
         self.log("INFO", f"守护模式启动，执行间隔: {interval_seconds} 秒")
         while True:
             round_no += 1
