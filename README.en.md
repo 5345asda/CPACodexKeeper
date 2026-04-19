@@ -72,6 +72,11 @@ Each inspection round follows this sequence:
 
 This process is **round-based with intra-round concurrency**. One full round still completes before the next round starts, but multiple tokens can be inspected concurrently within the same round.
 
+In daemon mode, two additional paths may run alongside the main full scan:
+
+- When `CPA_USAGE_QUERY_INTERVAL > 0`, the keeper also starts a log-driven inspection loop based on `/v0/management/usage`. It compares against the previous query time, keeps only accounts that had new usage in that interval and still exist in filtered codex auth-files, then runs quota checks only for those accounts. This log-driven loop only disables; it does not re-enable, refresh, or delete.
+- For accounts auto-disabled by the keeper and written into `disabled_accounts.json`, the keeper records `next_check_at` and arms an independent timer. When the timer fires, quota is rechecked immediately; if quota has recovered the account is re-enabled, otherwise a new recheck time is scheduled.
+
 ---
 
 ## 3. Supported quota logic
@@ -140,7 +145,7 @@ Then edit `.env`.
 - `CPA_ENABLE_REFRESH`: whether automatic refresh for disabled tokens is enabled, default `true`
 - `CPA_HTTP_TIMEOUT`: timeout for CPA API requests, default `30`
 - `CPA_USAGE_TIMEOUT`: timeout for OpenAI usage requests, default `15`
-- `CPA_USAGE_QUERY_INTERVAL`: lookback window in seconds when querying CPA `/v0/management/usage` logs, default `7200`
+- `CPA_USAGE_QUERY_INTERVAL`: log inspection interval in seconds, also used as the lookback window when querying `/v0/management/usage`, default `7200`; set to `0` to disable log inspection
 - `CPA_MAX_RETRIES`: retry count for transient network / 5xx failures, default `2`
 - `CPA_WORKER_THREADS`: number of worker threads per inspection round, default `8`
 
@@ -148,7 +153,7 @@ The `.env.example` file already includes bilingual comments for direct editing.
 
 Automatic refresh is enabled by default, but the keeper still refreshes only tokens that remain disabled after quota handling; enabled tokens are left to CPA's own auto-refresh logic. If you need to avoid competing with another writer rotating the same shared `refresh_token`, set it to `false` in `.env`.
 
-The keeper maintains `disabled_accounts.json` in the project root to persist the next quota recheck time for accounts it auto-disabled after reaching `CPA_QUOTA_THRESHOLD`. Only keeper-disabled accounts are tracked there; manually disabled accounts are never auto-enabled. If the threshold-reaching windows do not expose `reset_at`, the first schedule uses `CPA_QUOTA_RESET_NONE_RECHECK_SECONDS`; later due rechecks fall back to `CPA_INTERVAL` when no new `reset_at` appears.
+The keeper maintains `disabled_accounts.json` in the project root to persist the next quota recheck time `next_check_at` for accounts it auto-disabled after reaching `CPA_QUOTA_THRESHOLD`. Only keeper-disabled accounts are tracked there; manually disabled accounts are never auto-enabled. When daemon mode starts, the file is loaded and independent timers are restored; if a recorded time is already in the past, the recheck runs immediately using the normal quota logic. If the threshold-reaching windows do not expose `reset_at`, the first schedule uses `CPA_QUOTA_RESET_NONE_RECHECK_SECONDS`; later due rechecks fall back to `CPA_INTERVAL` when no new `reset_at` appears.
 
 ---
 
@@ -181,6 +186,12 @@ Useful for continuous maintenance:
 ```bash
 python main.py
 ```
+
+By default this starts:
+
+- the original full inspection loop
+- timer-based rechecks for accounts already recorded in `disabled_accounts.json`
+- and, when `CPA_USAGE_QUERY_INTERVAL > 0`, an additional log-driven inspection thread
 
 ### Dry run
 
