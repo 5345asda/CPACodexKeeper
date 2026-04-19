@@ -195,6 +195,7 @@ class CPACodexKeeper:
         primary_reached = primary_pct >= self.settings.quota_threshold
         secondary_present = secondary_pct is not None
         secondary_reached = secondary_present and secondary_pct >= self.settings.quota_threshold
+        effective_disabled = disabled
 
         if secondary_present:
             below_threshold = primary_pct < self.settings.quota_threshold and secondary_pct < self.settings.quota_threshold
@@ -225,21 +226,22 @@ class CPACodexKeeper:
                 if self.set_disabled_status(name, disabled=False, logger=logger):
                     logger.log("ENABLE", "已重新启用", indent=1)
                     self._inc_stat("enabled")
+                    effective_disabled = False
                 else:
                     logger.log("ERROR", "启用失败", indent=1)
-                return
+                return None, effective_disabled
             if not has_refresh_token and (primary_reached or secondary_reached):
                 return self._delete_token_with_reason(
                     name,
                     f"无 Refresh Token，且{reached_summary} >= {self.settings.quota_threshold}%，准备删除",
                     logger,
-                )
+                ), effective_disabled
             logger.log(
                 "INFO",
                 f"已禁用，{reached_summary} >= {self.settings.quota_threshold}%，保持禁用",
                 indent=1,
             )
-            return
+            return None, effective_disabled
 
         if primary_reached or secondary_reached:
             if not has_refresh_token:
@@ -247,7 +249,7 @@ class CPACodexKeeper:
                     name,
                     f"无 Refresh Token，且{reached_summary} >= {self.settings.quota_threshold}%，准备删除",
                     logger,
-                )
+                ), effective_disabled
             logger.log(
                 "WARN",
                 f"{reached_summary} >= {self.settings.quota_threshold}%，准备禁用",
@@ -256,16 +258,27 @@ class CPACodexKeeper:
             if self.set_disabled_status(name, disabled=True, logger=logger):
                 logger.log("DISABLE", "已禁用", indent=1)
                 self._inc_stat("disabled")
+                effective_disabled = True
             else:
                 logger.log("ERROR", "禁用失败", indent=1)
+            return None, effective_disabled
 
-    def _apply_refresh_policy(self, name, token_detail, remaining_seconds, remaining_str, logger):
+        return None, effective_disabled
+
+    def _apply_refresh_policy(self, name, token_detail, remaining_seconds, remaining_str, logger, *, disabled):
         expiry_threshold_seconds = self.settings.expiry_threshold_days * 86400
         if remaining_seconds > 0 and remaining_seconds < expiry_threshold_seconds:
             if not self.settings.enable_refresh:
                 logger.log(
                     "INFO",
                     f"剩余 {remaining_str} < {self.settings.expiry_threshold_days} 天，但刷新功能已关闭",
+                    indent=1,
+                )
+                return
+            if not disabled:
+                logger.log(
+                    "INFO",
+                    f"剩余 {remaining_str} < {self.settings.expiry_threshold_days} 天，但当前为启用状态，交给 CPA 自动刷新",
                     indent=1,
                 )
                 return
@@ -316,7 +329,7 @@ class CPACodexKeeper:
 
             body_info = self.parse_usage_info(resp_data)
             primary_pct, secondary_pct = self._log_usage_summary(body_info, logger)
-            quota_result = self._apply_quota_policy(
+            quota_result, refresh_disabled = self._apply_quota_policy(
                 name,
                 disabled,
                 primary_pct,
@@ -326,7 +339,14 @@ class CPACodexKeeper:
             )
             if quota_result:
                 return quota_result
-            self._apply_refresh_policy(name, token_detail, remaining_seconds, remaining_str, logger)
+            self._apply_refresh_policy(
+                name,
+                token_detail,
+                remaining_seconds,
+                remaining_str,
+                logger,
+                disabled=refresh_disabled,
+            )
 
             self._inc_stat("alive")
             logger.blank_line()
@@ -339,7 +359,7 @@ class CPACodexKeeper:
         self.log("INFO", "CPACodexKeeper 启动")
         self.log("INFO", f"API: {self.settings.cpa_endpoint}")
         self.log("INFO", f"Quota threshold: {self.settings.quota_threshold}% (disable when reached)")
-        self.log("INFO", f"Expiry threshold: {self.settings.expiry_threshold_days} days (refresh when below)")
+        self.log("INFO", f"Expiry threshold: {self.settings.expiry_threshold_days} days (refresh disabled auth when below)")
         self.log("INFO", f"Refresh enabled: {self.settings.enable_refresh}")
         if self.dry_run:
             self.log("DRY", "演练模式 (不实际修改)")

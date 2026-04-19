@@ -26,6 +26,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.cpa_token, "secret")
         self.assertEqual(settings.interval_seconds, 1800)
         self.assertEqual(settings.worker_threads, 8)
+        self.assertTrue(settings.enable_refresh)
 
     def test_load_settings_reads_from_project_env_file(self):
         env_file = self._make_env_file("CPA_ENDPOINT=https://env-file.example.com\nCPA_TOKEN=file-secret\nCPA_INTERVAL=120\nCPA_WORKER_THREADS=6\n")

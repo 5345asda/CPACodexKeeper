@@ -14,7 +14,7 @@ It does not create tokens. Instead, it continuously maintains **existing codex t
 
 - check whether a token is still valid
 - disable or re-enable tokens based on weekly or primary quota
-- optionally refresh tokens that are close to expiry
+- optionally refresh disabled tokens that are close to expiry
 - support `.env` configuration, Docker, and GitHub Actions CI
 
 ## Who this is for
@@ -24,7 +24,7 @@ If you already have a CPA-style token management API and want to:
 - clean invalid tokens automatically
 - control token usage quota
 - re-enable tokens when quota recovers
-- enable auto-refresh for near-expiry tokens when needed
+- enable auto-refresh for disabled near-expiry tokens when needed
 
 then this project is built for that workflow.
 
@@ -46,7 +46,7 @@ In practice, codex tokens are not static assets. Over time, they may run into is
 - tokens becoming invalid but still remaining in the management system
 - usage quota being exhausted
 - tokens being manually disabled and never re-enabled when quota recovers
-- tokens getting close to expiry and needing refresh only when refresh is explicitly allowed
+- disabled tokens getting close to expiry and needing refresh only when refresh is explicitly allowed
 - team and non-team accounts returning different usage structures
 
 CPACodexKeeper automates those maintenance tasks so they do not need to be handled manually.
@@ -63,11 +63,11 @@ Each inspection round follows this sequence:
 4. read expiry information and remaining lifetime
 5. call the OpenAI usage endpoint
 6. delete the token if usage returns `401` or `402`, meaning the token is invalid or the workspace is deactivated
-7. if a **weekly quota window** exists, use it as the disable / enable source
-8. otherwise fall back to the primary quota window
+7. if a **weekly quota window** exists, evaluate both `5h` and weekly quota together
+8. disable when either window reaches the threshold, and re-enable only when both drop below it
 9. if the token has **no `refresh_token`** and is already expired, delete it directly
 10. if the token has **no `refresh_token`** and the checked quota reaches the threshold, delete it directly
-11. if automatic refresh is explicitly enabled and the token is close to expiry, refresh it
+11. if automatic refresh is explicitly enabled and the token is still disabled after quota handling and close to expiry, refresh it
 12. upload the refreshed token payload back to CPA
 
 This process is **round-based with intra-round concurrency**. One full round still completes before the next round starts, but multiple tokens can be inspected concurrently within the same round.
@@ -87,7 +87,8 @@ When the usage response includes both windows:
 
 In that case, the program will:
 
-- use `secondary_window.used_percent` first for disable / enable decisions
+- disable when either `primary_window.used_percent` or `secondary_window.used_percent` reaches the threshold
+- re-enable only when both windows are below the threshold
 - automatically send the `Chatgpt-Account-Id` header
 
 ### Non-team or no weekly window
@@ -134,8 +135,8 @@ Then edit `.env`.
 - `CPA_PROXY`: optional HTTP/HTTPS proxy
 - `CPA_INTERVAL`: daemon interval in seconds, default `1800`
 - `CPA_QUOTA_THRESHOLD`: disable threshold, default `100`
-- `CPA_EXPIRY_THRESHOLD_DAYS`: refresh threshold in days, default `3`
-- `CPA_ENABLE_REFRESH`: whether automatic refresh is enabled, default `false`
+- `CPA_EXPIRY_THRESHOLD_DAYS`: refresh threshold in days for disabled tokens, default `3`
+- `CPA_ENABLE_REFRESH`: whether automatic refresh for disabled tokens is enabled, default `true`
 - `CPA_HTTP_TIMEOUT`: timeout for CPA API requests, default `30`
 - `CPA_USAGE_TIMEOUT`: timeout for OpenAI usage requests, default `15`
 - `CPA_MAX_RETRIES`: retry count for transient network / 5xx failures, default `2`
@@ -143,7 +144,7 @@ Then edit `.env`.
 
 The `.env.example` file already includes bilingual comments for direct editing.
 
-Automatic refresh is disabled by default so this keeper does not compete with another writer rotating the same shared `refresh_token`.
+Automatic refresh is enabled by default, but the keeper still refreshes only tokens that remain disabled after quota handling; enabled tokens are left to CPA's own auto-refresh logic. If you need to avoid competing with another writer rotating the same shared `refresh_token`, set it to `false` in `.env`.
 
 ---
 
