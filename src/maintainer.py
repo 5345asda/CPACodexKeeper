@@ -780,16 +780,16 @@ class CPACodexKeeper:
 
     def run_fill_forever(self, interval_seconds=10):
         round_no = 0
-        self.log("INFO", f"fill 模式启动，执行间隔: {interval_seconds} 秒")
+        self.log("INFO", f"日志 巡检模式启动，执行间隔: {interval_seconds} 秒")
         while True:
             round_no += 1
-            self.log("INFO", f"开始第 {round_no} 轮 fill 巡检")
+            self.log("INFO", f"开始第 {round_no} 轮 日志 巡检")
             try:
                 self.run_fill_once()
-                self.log("INFO", f"第 {round_no} 轮 fill 巡检结束")
+                self.log("INFO", f"第 {round_no} 轮 日志 巡检结束")
             except KeyboardInterrupt:
                 raise
             except Exception as exc:
-                self.log("ERROR", f"第 {round_no} 轮 fill 巡检异常: {exc}")
-            self.log("INFO", f"等待 {interval_seconds} 秒后开始下一轮 fill 巡检")
+                self.log("ERROR", f"第 {round_no} 轮 日志 巡检异常: {exc}")
+            self.log("INFO", f"等待 {interval_seconds} 秒后开始下一轮 日志 巡检")
             time.sleep(interval_seconds)
