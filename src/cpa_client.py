@@ -25,8 +25,8 @@ class CPAClient:
         for attempt in range(self.max_retries + 1):
             try:
                 response = requests.request(
-                    method,
-                    f"{self.base_url}{path}",
+                    method=method,
+                    url=f"{self.base_url}{path}",
                     headers=self.headers,
                     proxies=self.proxies,
                     impersonate="chrome",
@@ -73,6 +73,12 @@ class CPAClient:
     def set_disabled(self, name: str, disabled: bool) -> bool:
         result = self._request("PATCH", "/v0/management/auth-files/status", json={"name": name, "disabled": disabled})
         return result.status_code == 200
+
+    def get_usage_log(self, *, lookback_seconds: int) -> dict[str, Any] | None:
+        result = self._request("GET", "/v0/management/usage", params={"lookback_seconds": lookback_seconds})
+        if result.status_code != 200 or not result.json_data:
+            return None
+        return result.json_data
 
     def upload_auth_file(self, name: str, token_data: dict[str, Any]) -> bool:
         result = self._request(

@@ -1,4 +1,6 @@
-from .maintainer import CPACodexKeeper
+import threading
+
+from .maintainer import CPACodexKeeper, PriorityCoordinator
 from .settings import SettingsError, load_settings
 
 
@@ -20,8 +22,19 @@ def main() -> int:
     except SettingsError as exc:
         parser.exit(status=2, message=f"Configuration error: {exc}\n")
 
-    maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run)
+    coordinator = PriorityCoordinator()
+    logger = None
+    maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator, logger=logger)
     if args.daemon:
+        maintainer._start_tracked_rechecks()
+        if settings.usage_query_interval_seconds > 0:
+            fill_maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator, logger=maintainer.logger)
+            fill_thread = threading.Thread(
+                target=fill_maintainer.run_fill_forever,
+                kwargs={"interval_seconds": settings.usage_query_interval_seconds},
+                daemon=True,
+            )
+            fill_thread.start()
         maintainer.run_forever(interval_seconds=settings.interval_seconds)
         return 0
     maintainer.run()
