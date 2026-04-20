@@ -19,19 +19,26 @@ class ConsoleLogger:
     def __init__(self) -> None:
         self._lock = threading.Lock()
 
-    def log(self, level: str, message: str, indent: int = 0) -> None:
+    def format_line(self, level: str, message: str, indent: int = 0) -> str:
         prefix = self.PREFIX_MAP.get(level, f"[{level}]")
+        return f"{'    ' * indent}{prefix} {message}"
+
+    def log(self, level: str, message: str, indent: int = 0) -> None:
         with self._lock:
-            print(f"{'    ' * indent}{prefix} {message}")
+            print(self.format_line(level, message, indent=indent))
 
     def token_header(self, idx: int, total: int, name: str) -> None:
         with self._lock:
-            print(f"[{idx}/{total}] {name}")
+            print(f"[{idx}/{total}] Token: {name}")
 
     def banner(self, title: str) -> None:
-        self.divider()
-        self.log("INFO", title)
-        self.log("INFO", f"time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.emit_lines([
+            "=" * 60,
+            self.format_line("INFO", title),
+            self.format_line("INFO", f"当前时间: {now}"),
+            "=" * 60,
+        ])
 
     def divider(self) -> None:
         with self._lock:
@@ -42,7 +49,6 @@ class ConsoleLogger:
             print()
 
     def emit_lines(self, lines: list[str]) -> None:
-        """一次性输出多行日志，保证原子性（线程安全）。"""
         if not lines:
             return
         with self._lock:
@@ -51,21 +57,17 @@ class ConsoleLogger:
 
 
 class TokenLogger:
-    """单个 Token 处理过程的日志收集器，收集完成后一次性输出。"""
-
     def __init__(self, logger: ConsoleLogger, idx: int, total: int, name: str):
         self._logger = logger
         self._buffer: list[str] = []
-        self._buffer.append(f"[{idx}/{total}] {name}")
+        self._buffer.append(f"[{idx}/{total}] Token: {name}")
 
     def log(self, level: str, message: str, indent: int = 0) -> None:
-        prefix = ConsoleLogger.PREFIX_MAP.get(level, f"[{level}]")
-        self._buffer.append(f"{'    ' * indent}{prefix} {message}")
+        self._buffer.append(self._logger.format_line(level, message, indent=indent))
 
     def blank_line(self) -> None:
         self._buffer.append("")
 
     def flush(self) -> None:
-        """一次性输出收集的所有日志。"""
         self._logger.emit_lines(self._buffer.copy())
         self._buffer.clear()

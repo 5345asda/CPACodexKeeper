@@ -81,9 +81,9 @@ class PriorityCoordinator:
 
 class CPACodexKeeper:
     PAUSE_MESSAGES = {
-        ("full", "log"): "主巡检因日志巡检等待而暂停",
-        ("full", "timer"): "主巡检因定时复查等待而暂停",
-        ("log", "timer"): "日志巡检因定时复查等待而暂停",
+        ("full", "log"): "优先级协调：日志巡检正在等待，主巡检将在当前 Token 完成后暂停",
+        ("full", "timer"): "优先级协调：定时复查正在等待，主巡检将在当前 Token 完成后暂停",
+        ("log", "timer"): "优先级协调：定时复查正在等待，日志巡检将在当前 Token 完成后暂停",
     }
     def __init__(self, settings: Settings, dry_run: bool = False, coordinator: PriorityCoordinator | None = None):
         self.settings = settings
@@ -147,13 +147,13 @@ class CPACodexKeeper:
 
     def delete_token(self, name, logger=None):
         if self.dry_run:
-            (logger or self).log("DRY", f"将删除: {name}", indent=1)
+            (logger or self).log("DRY", f"演练模式：将删除账号文件 {name}", indent=1)
             return True
         return self.cpa_client.delete_auth_file(name)
 
     def set_disabled_status(self, name, disabled=True, logger=None):
         if self.dry_run:
-            (logger or self).log("DRY", f"将{'禁用' if disabled else '启用'}: {name}", indent=1)
+            (logger or self).log("DRY", f"演练模式：将{'禁用' if disabled else '启用'}账号 {name}", indent=1)
             return True
         return self.cpa_client.set_disabled(name, disabled)
 
@@ -193,7 +193,7 @@ class CPACodexKeeper:
         try:
             data = json.loads(self.disabled_accounts_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            self.log("ERROR", f"加载禁用账号计划失败: {exc}")
+            self.log("ERROR", f"加载禁用账号计划失败：{exc}")
             return {}
         if not isinstance(data, dict):
             return {}
@@ -253,7 +253,7 @@ class CPACodexKeeper:
             self.log("INFO", pause_message)
         self.coordinator.acquire_next(priority)
         if priority == "timer":
-            self.log("INFO", "定时复查已获取最高优先级")
+            self.log("INFO", "定时复查已取得最高优先级，开始处理到期账号")
 
     def _release_priority(self, priority):
         self.coordinator.release(priority)
@@ -267,7 +267,7 @@ class CPACodexKeeper:
             and has_lower_work is not None
             and has_lower_work(priority)
         ):
-            self.log("INFO", "定时复查队列已清空，恢复较低优先级任务")
+            self.log("INFO", "定时复查队列已清空，较低优先级任务可以继续执行")
 
     def _set_tracked_next_check_at(self, name, ts):
         ts_int = int(ts)
@@ -433,14 +433,13 @@ class CPACodexKeeper:
         name = token_info.get("name", "unknown")
         logger = TokenLogger(self.logger, idx, total, name)
         try:
-            logger.log("INFO", "获取详情...", indent=1)
             token_detail = self.get_token_detail(name)
             if not token_detail:
-                return self._skip_token("获取详情失败", logger)
+                return self._skip_token("获取账号详情失败", logger)
 
             disabled, _, _, _ = self._log_token_details(token_detail, logger)
             if disabled:
-                logger.log("INFO", "已禁用，fill 模式跳过", indent=1)
+                logger.log("INFO", "当前账号已禁用，日志巡查跳过额度检查", indent=1)
                 self._inc_stat("alive")
                 logger.blank_line()
                 return "alive"
@@ -450,13 +449,12 @@ class CPACodexKeeper:
             if not access_token:
                 return self._skip_token("缺少 access_token", logger)
 
-            logger.log("INFO", "检测在线状态...", indent=1)
             status, resp_data = self.check_token_live(access_token, account_id)
             if status in (401, 402):
-                return self._skip_token(f"状态异常 ({status})", logger)
+                return self._skip_token(f"在线状态异常 ({status})", logger)
             if status is None:
                 detail = resp_data.get("brief", "") if isinstance(resp_data, dict) else str(resp_data)
-                msg = "网络检测失败"
+                msg = "在线状态检查失败"
                 if detail:
                     msg += f" | {detail}"
                 return self._skip_token(msg, logger, network_error=True)
@@ -474,15 +472,15 @@ class CPACodexKeeper:
             if quota_reached:
                 logger.log(
                     "WARN",
-                    f"{reached_summary} >= {self.settings.quota_threshold}%，准备禁用",
+                    f"额度命中禁用阈值：{reached_summary} >= {self.settings.quota_threshold}%，准备禁用账号",
                     indent=1,
                 )
                 if self.set_disabled_status(name, disabled=True, logger=logger):
-                    logger.log("DISABLE", "已禁用", indent=1)
+                    logger.log("DISABLE", "账号已禁用", indent=1)
                     self._inc_stat("disabled")
                     logger.blank_line()
                     return "disabled"
-                return self._skip_token("禁用失败", logger)
+                return self._skip_token("禁用账号失败", logger)
 
             self._inc_stat("alive")
             logger.blank_line()
@@ -511,7 +509,7 @@ class CPACodexKeeper:
 
     def upload_updated_token(self, name, token_data, logger=None):
         if self.dry_run:
-            (logger or self).log("DRY", f"将上传更新: {name}", indent=1)
+            (logger or self).log("DRY", f"演练模式：将上传更新后的账号数据 {name}", indent=1)
             return True
         return self.cpa_client.upload_auth_file(name, token_data)
 
@@ -531,8 +529,9 @@ class CPACodexKeeper:
         expired_str, remaining_seconds, expiry_known = get_expired_remaining_with_status(token_detail)
         remaining_str = format_seconds(remaining_seconds) if expiry_known else "未知"
 
-        logger.log("INFO", f"Email: {email}", indent=1)
-        logger.log("INFO", f"状态: {'已禁用' if disabled else '正常'}", indent=1)
+        logger.log("INFO", "步骤: 获取账号详情", indent=1)
+        logger.log("INFO", f"账号邮箱: {email}", indent=1)
+        logger.log("INFO", f"当前状态: {'已禁用' if disabled else '正常'}", indent=1)
         logger.log("INFO", f"过期时间: {expired_str or '未知'}", indent=1)
         logger.log("INFO", f"剩余有效期: {remaining_str}", indent=1)
         return disabled, remaining_seconds, remaining_str, expiry_known
@@ -544,7 +543,7 @@ class CPACodexKeeper:
         logger.log("WARN", reason, indent=1)
         if self.delete_token(name, logger=logger):
             self._remove_tracked_account(name)
-            logger.log("DELETE", "已删除", indent=1)
+            logger.log("DELETE", "账号文件已删除", indent=1)
             self._inc_stat("dead")
             logger.blank_line()
             return "dead"
@@ -579,7 +578,8 @@ class CPACodexKeeper:
         if secondary_pct is not None:
             quota_info += f" | {secondary_label}: {secondary_pct}%"
         quota_info += f" | Credits: {credits}"
-        logger.log("OK", f"存活 | Plan: {plan} | {quota_info}", indent=1)
+        logger.log("INFO", "步骤: 检查在线状态与额度", indent=1)
+        logger.log("OK", f"在线状态: 正常 | 套餐: {plan} | {quota_info}", indent=1)
         return primary_pct, secondary_pct, primary_label, secondary_label
 
     def _apply_quota_policy(
@@ -634,7 +634,7 @@ class CPACodexKeeper:
                     )
                 if self.set_disabled_status(name, disabled=False, logger=logger):
                     self._remove_tracked_account(name)
-                    logger.log("ENABLE", "已重新启用", indent=1)
+                    logger.log("ENABLE", "账号已重新启用", indent=1)
                     self._inc_stat("enabled")
                     effective_disabled = False
                 else:
@@ -688,7 +688,7 @@ class CPACodexKeeper:
                     token_detail=token_detail,
                 )
                 self._set_tracked_next_check_at(name, next_check_at)
-                logger.log("DISABLE", "已禁用", indent=1)
+                logger.log("DISABLE", "账号已禁用", indent=1)
                 logger.log("INFO", f"已记录下次检查额度时间: {self._format_tracked_next_check_at(next_check_at)}", indent=1)
                 self._inc_stat("disabled")
             else:
@@ -720,11 +720,11 @@ class CPACodexKeeper:
                 if self.upload_updated_token(name, new_data, logger=logger):
                     if disabled:
                         if self.set_disabled_status(name, disabled=True, logger=logger):
-                            logger.log("DISABLE", "刷新后保持禁用", indent=1)
+                            logger.log("DISABLE", "刷新后继续保持禁用状态", indent=1)
                         else:
                             logger.log("ERROR", "刷新后回写禁用失败", indent=1)
                     _, new_remaining = get_expired_remaining(new_data)
-                    logger.log("REFRESH", f"{msg}，新剩余: {format_seconds(new_remaining)}", indent=1)
+                    logger.log("REFRESH", f"账号刷新成功，新剩余有效期: {format_seconds(new_remaining)}", indent=1)
                     self._inc_stat("refreshed")
                 else:
                     logger.log("ERROR", "刷新成功但上传失败", indent=1)
@@ -737,10 +737,9 @@ class CPACodexKeeper:
         name = token_info.get("name", "unknown")
         logger = TokenLogger(self.logger, idx, total, name)
         try:
-            logger.log("INFO", "获取详情...", indent=1)
             token_detail = self.get_token_detail(name)
             if not token_detail:
-                return self._skip_token("获取详情失败", logger)
+                return self._skip_token("获取账号详情失败", logger)
 
             disabled, remaining_seconds, remaining_str, expiry_known = self._log_token_details(token_detail, logger)
             tracked_next_check_at = self._get_tracked_next_check_at(name)
@@ -755,20 +754,19 @@ class CPACodexKeeper:
             if disabled and tracked_next_check_at is not None and now < tracked_next_check_at:
                 logger.log(
                     "INFO",
-                    f"已禁用，计划于 {self._format_tracked_next_check_at(tracked_next_check_at)} 后复查使用额度，当前跳过",
+                    f"当前账号已禁用，计划于 {self._format_tracked_next_check_at(tracked_next_check_at)} 后复查额度，当前轮次跳过",
                     indent=1,
                 )
                 self._inc_stat("alive")
                 logger.blank_line()
                 return "alive"
 
-            logger.log("INFO", "检测在线状态...", indent=1)
             status, resp_data = self.check_token_live(access_token, account_id)
             if status in (401, 402):
                 return self._handle_invalid_token(name, logger)
             if status is None:
                 detail = resp_data.get("brief", "") if isinstance(resp_data, dict) else str(resp_data)
-                msg = "网络检测失败"
+                msg = "在线状态检查失败"
                 if detail:
                     msg += f" | {detail}"
                 return self._skip_token(msg, logger, network_error=True)
@@ -811,21 +809,23 @@ class CPACodexKeeper:
         info_prefix = self.logger.PREFIX_MAP["INFO"]
         dry_prefix = self.logger.PREFIX_MAP["DRY"]
         usage_query_interval_display = (
-            "disabled"
+            "已禁用（CPA_USAGE_QUERY_INTERVAL=0）"
             if self.settings.usage_query_interval_seconds == 0
-            else f"{self.settings.usage_query_interval_seconds} seconds"
+            else f"{self.settings.usage_query_interval_seconds} 秒"
         )
         lines = [
             "=" * 60,
-            f"{info_prefix} CPACodexKeeper 启动",
-            f"{info_prefix} API: {self.settings.cpa_endpoint}",
-            f"{info_prefix} Quota threshold: {self.settings.quota_threshold}% (disable when reached)",
-            f"{info_prefix} Expiry threshold: {self.settings.expiry_threshold_days} days (refresh disabled auth when below)",
-            f"{info_prefix} Usage query interval: {usage_query_interval_display}",
-            f"{info_prefix} Refresh enabled: {self.settings.enable_refresh}",
+            f"{info_prefix} 启动配置",
+            f"    {info_prefix} CPA 接口: {self.settings.cpa_endpoint}",
+            f"    {info_prefix} 配额阈值: {self.settings.quota_threshold}%",
+            f"    {info_prefix} 过期刷新阈值: {self.settings.expiry_threshold_days} 天",
+            f"    {info_prefix} 主巡检间隔: {self.settings.interval_seconds} 秒",
+            f"    {info_prefix} 日志巡检间隔: {usage_query_interval_display}",
+            f"    {info_prefix} 主巡检线程数: {self.settings.worker_threads}",
+            f"    {info_prefix} 自动刷新: {'开启' if self.settings.enable_refresh else '关闭'}",
         ]
         if self.dry_run:
-            lines.append(f"{dry_prefix} 演练模式 (不实际修改)")
+            lines.append(f"    {dry_prefix} 运行模式: 演练模式（不实际修改）")
         lines.append("=" * 60)
         self.logger.emit_lines(lines)
 
@@ -863,68 +863,80 @@ class CPACodexKeeper:
         self.log_startup()
         tokens = self.get_token_list()
         if not tokens:
-            self.log("WARN", "未获取到任何 codex Token")
+            self.log("WARN", "主巡检未发现任何可处理的 codex 账号")
             return
 
         self._set_total(len(tokens))
         random.shuffle(tokens)
         start_time = time.time()
         total = len(tokens)
-        self.log("INFO", f"共计: {total} 个 codex Token")
-        self.log("INFO", f"线程数: {self.settings.worker_threads}")
+        self.log("INFO", f"主巡检任务已就绪：本轮共 {total} 个 codex 账号 待处理")
+        self.log("INFO", f"主巡检并发设置：{self.settings.worker_threads} 个工作线程")
         self.blank_line()
 
         self._process_tokens_with_priority(tokens)
 
         elapsed = time.time() - start_time
         stats = self._stats_snapshot()
-        self.logger.divider()
-        self.log("INFO", "执行完成")
-        self.log("INFO", f"耗时: {elapsed:.1f} 秒")
-        self.log("INFO", "统计:")
-        self.log("INFO", f"- 总计: {stats['total']}", indent=1)
-        self.log("INFO", f"- 存活: {stats['alive']}", indent=1)
-        self.log("INFO", f"- 死号(已删除): {stats['dead']}", indent=1)
-        self.log("INFO", f"- 已禁用: {stats['disabled']}", indent=1)
-        self.log("INFO", f"- 已启用: {stats['enabled']}", indent=1)
-        self.log("INFO", f"- 已刷新: {stats['refreshed']}", indent=1)
-        self.log("INFO", f"- 跳过: {stats['skipped']}", indent=1)
-        self.log("INFO", f"- 网络失败: {stats['network_error']}", indent=1)
-        self.logger.divider()
+        info_prefix = self.logger.PREFIX_MAP["INFO"]
+        ok_prefix = self.logger.PREFIX_MAP["OK"]
+        disable_prefix = self.logger.PREFIX_MAP["DISABLE"]
+        enable_prefix = self.logger.PREFIX_MAP["ENABLE"]
+        refresh_prefix = self.logger.PREFIX_MAP["REFRESH"]
+        delete_prefix = self.logger.PREFIX_MAP["DELETE"]
+        skip_prefix = self.logger.PREFIX_MAP["SKIP"]
+        error_prefix = self.logger.PREFIX_MAP["ERROR"]
+        self.logger.emit_lines([
+            "=" * 60,
+            f"{info_prefix} 执行总结",
+            f"    {info_prefix} 总耗时: {elapsed:.1f} 秒",
+            f"    {info_prefix} Token 总数: {stats['total']}",
+            f"    {info_prefix} 工作线程: {self.settings.worker_threads}",
+            f"{info_prefix} 状态统计",
+            f"    {ok_prefix} 存活: {stats['alive']}",
+            f"    {delete_prefix} 死号(已删除): {stats['dead']}",
+            f"    {disable_prefix} 已禁用: {stats['disabled']}",
+            f"    {enable_prefix} 已启用: {stats['enabled']}",
+            f"    {refresh_prefix} 已刷新: {stats['refreshed']}",
+            f"{info_prefix} 其他统计",
+            f"    {skip_prefix} 跳过: {stats['skipped']}",
+            f"    {error_prefix} 网络失败: {stats['network_error']}",
+            "=" * 60,
+        ])
 
     def run_forever(self, interval_seconds=1800):
         round_no = 0
         self._start_tracked_rechecks()
-        self.log("INFO", f"守护模式启动，执行间隔: {interval_seconds} 秒")
+        self.log("INFO", f"主巡检守护进程已启动（轮询间隔: {interval_seconds} 秒）")
         while True:
             round_no += 1
-            self.log("INFO", f"开始第 {round_no} 轮巡检")
+            self.log("INFO", f"主巡检第 {round_no} 轮开始：准备扫描全部 codex 账号")
             try:
                 self.run()
-                self.log("INFO", f"第 {round_no} 轮巡检结束")
+                self.log("INFO", f"主巡检第 {round_no} 轮结束：已完成本轮全部 codex 账号扫描")
             except KeyboardInterrupt:
                 raise
             except Exception as exc:
-                self.log("ERROR", f"第 {round_no} 轮巡检异常: {exc}")
-            self.log("INFO", f"等待 {interval_seconds} 秒后开始下一轮")
+                self.log("ERROR", f"主巡检第 {round_no} 轮异常: {exc}")
+            self.log("INFO", f"主巡检休眠中：{interval_seconds} 秒后开始下一轮全量扫描")
             time.sleep(interval_seconds)
 
     def run_fill_once(self):
         if self.settings.usage_query_interval_seconds == 0:
-            self.log("INFO", "fill 模式 usage 日志查询已禁用")
+            self.log("INFO", "日志巡检已禁用：CPA_USAGE_QUERY_INTERVAL=0，跳过本轮CPA使用日志扫描")
             return "disabled"
 
         now = int(time.time())
         if self.last_usage_query_time is None:
             self.last_usage_query_time = now
-            self.log("INFO", "fill 模式首次启动，已记录查询时间，等待下一轮")
+            self.log("INFO", "日志巡检首次启动：已记录起始查询时间，下一轮开始比对新增日志")
             return "primed"
 
         query_started_at = now
         usage_data = self.get_usage_log()
         if not usage_data:
             self.last_usage_query_time = query_started_at
-            self.log("WARN", "fill 模式未获取到 usage 日志")
+            self.log("WARN", "日志巡检未获取到CPA日志数据：本轮无法筛选新增调用账号")
             return "skipped"
 
         latest_by_email = self._latest_usage_timestamp_by_email(usage_data, after_timestamp=self.last_usage_query_time)
@@ -935,28 +947,31 @@ class CPACodexKeeper:
         if total:
             self.reset_stats()
             self._set_total(total)
+            self.log("INFO", f"日志巡检命中 {total} 个账号：开始逐个校验额度并按需禁用")
             for idx, token_info in enumerate(matched_tokens, 1):
                 self._acquire_priority("log")
                 try:
                     self.process_fill_token(token_info, idx, total)
                 finally:
                     self._release_priority("log")
+        else:
+            self.log("INFO", "日志巡检未命中新账号：本轮没有需要进一步检查的 usage 记录")
 
         self.last_usage_query_time = query_started_at
         return "processed"
 
     def run_fill_forever(self, interval_seconds=10):
         round_no = 0
-        self.log("INFO", f"日志 巡检模式启动，执行间隔: {interval_seconds} 秒")
+        self.log("INFO", f"日志巡检守护进程已启动（轮询间隔: {interval_seconds} 秒）")
         while True:
             round_no += 1
-            self.log("INFO", f"开始第 {round_no} 轮 日志 巡检")
+            self.log("INFO", f"日志巡检第 {round_no} 轮开始：准备扫描新增CPA使用日志")
             try:
                 self.run_fill_once()
-                self.log("INFO", f"第 {round_no} 轮 日志 巡检结束")
+                self.log("INFO", f"日志巡检第 {round_no} 轮结束：已完成本轮CPA使用日志扫描")
             except KeyboardInterrupt:
                 raise
             except Exception as exc:
-                self.log("ERROR", f"第 {round_no} 轮 日志 巡检异常: {exc}")
-            self.log("INFO", f"等待 {interval_seconds} 秒后开始下一轮 日志 巡检")
+                self.log("ERROR", f"日志巡检第 {round_no} 轮异常: {exc}")
+            self.log("INFO", f"日志巡检休眠中：{interval_seconds} 秒后开始下一轮CPA使用日志扫描")
             time.sleep(interval_seconds)
