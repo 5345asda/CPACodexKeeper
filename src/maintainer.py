@@ -85,11 +85,19 @@ class CPACodexKeeper:
         ("full", "timer"): "优先级协调：定时复查正在等待，主巡检将在当前 Token 完成后暂停",
         ("log", "timer"): "优先级协调：定时复查正在等待，日志巡检将在当前 Token 完成后暂停",
     }
-    def __init__(self, settings: Settings, dry_run: bool = False, coordinator: PriorityCoordinator | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        dry_run: bool = False,
+        coordinator: PriorityCoordinator | None = None,
+        logger: ConsoleLogger | None = None,
+    ):
         self.settings = settings
         self.dry_run = dry_run
         self.coordinator = coordinator or PriorityCoordinator()
-        self.logger = ConsoleLogger()
+        self.logger = logger or ConsoleLogger(
+            archive_max_size_bytes=settings.log_archive_max_size_mb * 1024 * 1024,
+        )
         self.cpa_client = CPAClient(
             settings.cpa_endpoint,
             settings.cpa_token,
@@ -292,7 +300,7 @@ class CPACodexKeeper:
         self._acquire_priority("timer")
         try:
             self.logger.emit_lines([
-                f"{self.logger.PREFIX_MAP['INFO']} 账号 {name} 到达计划复查时间，开始复查使用额度"
+                self.logger.format_log_record("INFO", f"账号 {name} 到达计划复查时间，开始复查使用额度")
             ])
             self.process_token({"name": name}, 1, 1)
         except Exception as exc:
@@ -806,27 +814,25 @@ class CPACodexKeeper:
             logger.flush()
 
     def log_startup(self):
-        info_prefix = self.logger.PREFIX_MAP["INFO"]
-        dry_prefix = self.logger.PREFIX_MAP["DRY"]
         usage_query_interval_display = (
             "已禁用（CPA_USAGE_QUERY_INTERVAL=0）"
             if self.settings.usage_query_interval_seconds == 0
             else f"{self.settings.usage_query_interval_seconds} 秒"
         )
         lines = [
-            "=" * 60,
-            f"{info_prefix} 启动配置",
-            f"    {info_prefix} CPA 接口: {self.settings.cpa_endpoint}",
-            f"    {info_prefix} 配额阈值: {self.settings.quota_threshold}%",
-            f"    {info_prefix} 过期刷新阈值: {self.settings.expiry_threshold_days} 天",
-            f"    {info_prefix} 主巡检间隔: {self.settings.interval_seconds} 秒",
-            f"    {info_prefix} 日志巡检间隔: {usage_query_interval_display}",
-            f"    {info_prefix} 主巡检线程数: {self.settings.worker_threads}",
-            f"    {info_prefix} 自动刷新: {'开启' if self.settings.enable_refresh else '关闭'}",
+            self.logger.format_log_record("INFO", "=" * 60),
+            self.logger.format_log_record("INFO", "启动配置"),
+            self.logger.format_log_record("INFO", f"CPA 接口: {self.settings.cpa_endpoint}", indent=1),
+            self.logger.format_log_record("INFO", f"配额阈值: {self.settings.quota_threshold}%", indent=1),
+            self.logger.format_log_record("INFO", f"过期刷新阈值: {self.settings.expiry_threshold_days} 天", indent=1),
+            self.logger.format_log_record("INFO", f"主巡检间隔: {self.settings.interval_seconds} 秒", indent=1),
+            self.logger.format_log_record("INFO", f"日志巡检间隔: {usage_query_interval_display}", indent=1),
+            self.logger.format_log_record("INFO", f"主巡检线程数: {self.settings.worker_threads}", indent=1),
+            self.logger.format_log_record("INFO", f"自动刷新: {'开启' if self.settings.enable_refresh else '关闭'}", indent=1),
         ]
         if self.dry_run:
-            lines.append(f"    {dry_prefix} 运行模式: 演练模式（不实际修改）")
-        lines.append("=" * 60)
+            lines.append(self.logger.format_log_record("DRY", "运行模式: 演练模式（不实际修改）", indent=1))
+        lines.append(self.logger.format_log_record("INFO", "=" * 60))
         self.logger.emit_lines(lines)
 
     def _process_tokens_with_priority(self, tokens):
@@ -878,30 +884,22 @@ class CPACodexKeeper:
 
         elapsed = time.time() - start_time
         stats = self._stats_snapshot()
-        info_prefix = self.logger.PREFIX_MAP["INFO"]
-        ok_prefix = self.logger.PREFIX_MAP["OK"]
-        disable_prefix = self.logger.PREFIX_MAP["DISABLE"]
-        enable_prefix = self.logger.PREFIX_MAP["ENABLE"]
-        refresh_prefix = self.logger.PREFIX_MAP["REFRESH"]
-        delete_prefix = self.logger.PREFIX_MAP["DELETE"]
-        skip_prefix = self.logger.PREFIX_MAP["SKIP"]
-        error_prefix = self.logger.PREFIX_MAP["ERROR"]
         self.logger.emit_lines([
-            "=" * 60,
-            f"{info_prefix} 执行总结",
-            f"    {info_prefix} 总耗时: {elapsed:.1f} 秒",
-            f"    {info_prefix} Token 总数: {stats['total']}",
-            f"    {info_prefix} 工作线程: {self.settings.worker_threads}",
-            f"{info_prefix} 状态统计",
-            f"    {ok_prefix} 存活: {stats['alive']}",
-            f"    {delete_prefix} 死号(已删除): {stats['dead']}",
-            f"    {disable_prefix} 已禁用: {stats['disabled']}",
-            f"    {enable_prefix} 已启用: {stats['enabled']}",
-            f"    {refresh_prefix} 已刷新: {stats['refreshed']}",
-            f"{info_prefix} 其他统计",
-            f"    {skip_prefix} 跳过: {stats['skipped']}",
-            f"    {error_prefix} 网络失败: {stats['network_error']}",
-            "=" * 60,
+            self.logger.format_log_record("INFO", "=" * 60),
+            self.logger.format_log_record("INFO", "执行总结"),
+            self.logger.format_log_record("INFO", f"总耗时: {elapsed:.1f} 秒", indent=1),
+            self.logger.format_log_record("INFO", f"Token 总数: {stats['total']}", indent=1),
+            self.logger.format_log_record("INFO", f"工作线程: {self.settings.worker_threads}", indent=1),
+            self.logger.format_log_record("INFO", "状态统计"),
+            self.logger.format_log_record("OK", f"存活: {stats['alive']}", indent=1),
+            self.logger.format_log_record("DELETE", f"死号(已删除): {stats['dead']}", indent=1),
+            self.logger.format_log_record("DISABLE", f"已禁用: {stats['disabled']}", indent=1),
+            self.logger.format_log_record("ENABLE", f"已启用: {stats['enabled']}", indent=1),
+            self.logger.format_log_record("REFRESH", f"已刷新: {stats['refreshed']}", indent=1),
+            self.logger.format_log_record("INFO", "其他统计"),
+            self.logger.format_log_record("SKIP", f"跳过: {stats['skipped']}", indent=1),
+            self.logger.format_log_record("ERROR", f"网络失败: {stats['network_error']}", indent=1),
+            self.logger.format_log_record("INFO", "=" * 60),
         ])
 
     def run_forever(self, interval_seconds=1800):

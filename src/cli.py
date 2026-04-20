@@ -23,11 +23,12 @@ def main() -> int:
         parser.exit(status=2, message=f"Configuration error: {exc}\n")
 
     coordinator = PriorityCoordinator()
-    maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator)
+    logger = None
+    maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator, logger=logger)
     if args.daemon:
         maintainer._start_tracked_rechecks()
         if settings.usage_query_interval_seconds > 0:
-            fill_maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator)
+            fill_maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator, logger=maintainer.logger)
             fill_thread = threading.Thread(
                 target=fill_maintainer.run_fill_forever,
                 kwargs={"interval_seconds": settings.usage_query_interval_seconds},
