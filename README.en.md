@@ -148,12 +148,15 @@ Then edit `.env`.
 - `CPA_USAGE_QUERY_INTERVAL`: log inspection interval in seconds, also used as the lookback window when querying `/v0/management/usage`, default `7200`; set to `0` to disable log inspection
 - `CPA_MAX_RETRIES`: retry count for transient network / 5xx failures, default `2`
 - `CPA_WORKER_THREADS`: number of worker threads per inspection round, default `8`
+- `CPA_LOG_ARCHIVE_MAX_SIZE_MB`: total size limit in MB for archived logs under `./logs/archive`, default `500`
 
 The `.env.example` file already includes bilingual comments for direct editing.
 
 Automatic refresh is enabled by default, but the keeper still refreshes only tokens that remain disabled after quota handling; enabled tokens are left to CPA's own auto-refresh logic. If you need to avoid competing with another writer rotating the same shared `refresh_token`, set it to `false` in `.env`.
 
 The keeper maintains `disabled_accounts.json` in the project root to persist the next quota recheck time `next_check_at` for accounts it auto-disabled after reaching `CPA_QUOTA_THRESHOLD`. Only keeper-disabled accounts are tracked there; manually disabled accounts are never auto-enabled. When daemon mode starts, the file is loaded and independent timers are restored; if a recorded time is already in the past, the recheck runs immediately using the normal quota logic. If the threshold-reaching windows do not expose `reset_at`, the first schedule uses `CPA_QUOTA_RESET_NONE_RECHECK_SECONDS`; later due rechecks fall back to `CPA_INTERVAL` when no new `reset_at` appears.
+
+The program also creates a `./logs/` directory in the project root. Logs for the current process are written to `./logs/<start-time>.txt`; on each startup, older `.txt` logs are automatically compressed into `./logs/archive/`. The archive directory is capped by `CPA_LOG_ARCHIVE_MAX_SIZE_MB`, and older archives are pruned in time order when the total size exceeds that limit.
 
 ---
 
