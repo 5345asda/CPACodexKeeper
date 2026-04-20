@@ -144,6 +144,7 @@ cp .env.example .env
 - `CPA_QUOTA_RESET_NONE_RECHECK_SECONDS`：达到禁用阈值但对应 quota 窗口没有 `reset_at` 时的回查秒数，默认 `18000`
 - `CPA_EXPIRY_THRESHOLD_DAYS`：禁用 token 的刷新阈值天数，默认 `3`
 - `CPA_ENABLE_REFRESH`：是否启用对禁用 token 的自动刷新，默认 `true`
+- `CPA_ALLOW_DELETE`：是否允许删除账号文件，默认 `true`；设为 `false` 时，主巡检中原本的删除动作会改为禁用
 - `CPA_HTTP_TIMEOUT`：CPA API 请求超时秒数，默认 `30`
 - `CPA_USAGE_TIMEOUT`：OpenAI usage 请求超时秒数，默认 `15`
 - `CPA_USAGE_QUERY_INTERVAL`：日志巡检间隔秒数，同时作为查询 `/v0/management/usage` 时的回溯窗口，默认 `7200`，设为 `0` 表示禁用日志巡检
@@ -156,6 +157,8 @@ cp .env.example .env
 默认开启自动刷新，但 keeper 仍只会刷新当前轮处理后仍处于禁用状态的 token；启用状态 token 交给 CPA 自己的自动刷新逻辑处理。如果你需要避免与其他刷新写入方竞争，可以在 `.env` 里显式设成 `false`。
 
 程序会在项目根目录维护 `disabled_accounts.json`，用于记录 keeper 因 quota 达到 `CPA_QUOTA_THRESHOLD` 而自动禁用账号的下一次复查时间 `next_check_at`。只有被 keeper 自动禁用的账号才会进入这份状态文件；手动禁用账号不会被自动启用。启动守护模式时会先读取这份文件并恢复独立定时器；如果记录时间早于当前时间，则会立即按正常额度逻辑执行复查。若达到阈值的窗口没有 `reset_at`，首次会使用 `CPA_QUOTA_RESET_NONE_RECHECK_SECONDS` 兜底；后续到点复查后若仍没有新的 `reset_at`，则按 `CPA_INTERVAL` 继续顺延。
+
+当 `CPA_ALLOW_DELETE=false` 时，原本会删除的账号会改为禁用，并把事件追加记录到项目根目录的 `delete_blocked_accounts.json`；这类记录不会进入 `disabled_accounts.json`，也不会参与自动复查。
 
 程序还会在项目根目录创建 `./logs/` 目录。当前进程的日志会写入 `./logs/<启动时间>.txt`；每次启动时，旧的 `.txt` 日志会自动压缩到 `./logs/archive/`。归档目录会按 `CPA_LOG_ARCHIVE_MAX_SIZE_MB` 控制总大小，超出时按时间顺序清理较旧归档。
 

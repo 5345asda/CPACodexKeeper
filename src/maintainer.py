@@ -114,6 +114,7 @@ class CPACodexKeeper:
         self._stats_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self.disabled_accounts_path = Path(__file__).resolve().parents[1] / "disabled_accounts.json"
+        self.delete_blocked_accounts_path = Path(__file__).resolve().parents[1] / "delete_blocked_accounts.json"
         self._tracked_disabled_accounts = self._load_disabled_accounts_state()
         self._tracked_recheck_timers: dict[str, threading.Timer] = {}
         self._tracked_rechecks_started = False
@@ -210,6 +211,43 @@ class CPACodexKeeper:
     def _save_disabled_accounts_state(self):
         payload = json.dumps(self._tracked_disabled_accounts, ensure_ascii=False, indent=2, sort_keys=True)
         self.disabled_accounts_path.write_text(payload + "\n", encoding="utf-8")
+
+    def _load_delete_blocked_history(self):
+        if not self.delete_blocked_accounts_path.exists():
+            return {"events": []}
+        try:
+            data = json.loads(self.delete_blocked_accounts_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"events": []}
+        if not isinstance(data, dict):
+            return {"events": []}
+        events = data.get("events")
+        if not isinstance(events, list):
+            return {"events": []}
+        return {"events": events}
+
+    def _save_delete_blocked_history(self, payload):
+        self.delete_blocked_accounts_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _delete_blocked_updated_at(self):
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _append_delete_blocked_event(self, *, name, reason, trigger):
+        with self._state_lock:
+            payload = self._load_delete_blocked_history()
+            payload["events"].append(
+                {
+                    "name": name,
+                    "reason": reason,
+                    "source_action": "delete",
+                    "trigger": trigger,
+                    "updated_at": self._delete_blocked_updated_at(),
+                }
+            )
+            self._save_delete_blocked_history(payload)
 
     def _cancel_tracked_recheck_timer(self, name):
         timer = self._tracked_recheck_timers.pop(name, None)
@@ -547,23 +585,34 @@ class CPACodexKeeper:
     def _has_refresh_token(self, token_detail):
         return bool((token_detail.get("refresh_token") or "").strip())
 
-    def _delete_token_with_reason(self, name, reason, logger):
+    def _delete_token_with_reason(self, name, reason, trigger, logger):
         logger.log("WARN", reason, indent=1)
-        if self.delete_token(name, logger=logger):
+        if self.settings.allow_delete:
+            if self.delete_token(name, logger=logger):
+                self._remove_tracked_account(name)
+                logger.log("DELETE", "账号文件已删除", indent=1)
+                self._inc_stat("dead")
+                logger.blank_line()
+                return "dead"
+            return self._skip_token("删除失败", logger)
+
+        logger.log("INFO", "检测到 CPA_ALLOW_DELETE=false，删除已禁止，改为禁用账号", indent=1)
+        if self.set_disabled_status(name, disabled=True, logger=logger):
             self._remove_tracked_account(name)
-            logger.log("DELETE", "账号文件已删除", indent=1)
-            self._inc_stat("dead")
+            self._append_delete_blocked_event(name=name, reason=reason, trigger=trigger)
+            logger.log("DISABLE", "账号已禁用（原动作为删除）", indent=1)
+            self._inc_stat("disabled")
             logger.blank_line()
-            return "dead"
-        return self._skip_token("删除失败", logger)
+            return "alive"
+        return self._skip_token("禁用失败", logger)
 
     def _handle_invalid_token(self, name, logger):
-        return self._delete_token_with_reason(name, "Token 无效或 workspace 已停用，准备删除", logger)
+        return self._delete_token_with_reason(name, "Token 无效或 workspace 已停用，准备删除", "401_or_402", logger)
 
     def _apply_non_refreshable_expiry_policy(self, name, token_detail, remaining_seconds, expiry_known, logger):
         if self._has_refresh_token(token_detail) or not expiry_known or remaining_seconds > 0:
             return None
-        return self._delete_token_with_reason(name, "Token 已过期且无 Refresh Token，准备删除", logger)
+        return self._delete_token_with_reason(name, "Token 已过期且无 Refresh Token，准备删除", "expired_without_refresh_token", logger)
 
     def _handle_non_200_status(self, status, resp_data, logger):
         detail = resp_data.get("brief", "") if isinstance(resp_data, dict) else str(resp_data)
@@ -652,6 +701,7 @@ class CPACodexKeeper:
                 return self._delete_token_with_reason(
                     name,
                     f"无 Refresh Token，且{reached_summary} >= {self.settings.quota_threshold}%，准备删除",
+                    "quota_without_refresh_token",
                     logger,
                 ), effective_disabled
             if tracked_next_check_at is not None and body_info is not None and now is not None:
@@ -680,6 +730,7 @@ class CPACodexKeeper:
                 return self._delete_token_with_reason(
                     name,
                     f"无 Refresh Token，且{reached_summary} >= {self.settings.quota_threshold}%，准备删除",
+                    "quota_without_refresh_token",
                     logger,
                 ), effective_disabled
             logger.log(
@@ -829,6 +880,7 @@ class CPACodexKeeper:
             self.logger.format_log_record("INFO", f"日志巡检间隔: {usage_query_interval_display}", indent=1),
             self.logger.format_log_record("INFO", f"主巡检线程数: {self.settings.worker_threads}", indent=1),
             self.logger.format_log_record("INFO", f"自动刷新: {'开启' if self.settings.enable_refresh else '关闭'}", indent=1),
+            self.logger.format_log_record("INFO", f"允许删除账号文件: {'开启' if self.settings.allow_delete else '关闭'}", indent=1),
         ]
         if self.dry_run:
             lines.append(self.logger.format_log_record("DRY", "运行模式: 演练模式（不实际修改）", indent=1))
@@ -953,7 +1005,7 @@ class CPACodexKeeper:
                 finally:
                     self._release_priority("log")
         else:
-            self.log("INFO", "日志巡检未命中新账号：本轮没有需要进一步检查的 usage 记录")
+            self.log("INFO", "日志巡检未命中新账号：本轮没有需要进一步检查的CPA使用记录")
 
         self.last_usage_query_time = query_started_at
         return "processed"

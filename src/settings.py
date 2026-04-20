@@ -14,6 +14,7 @@ DEFAULT_CPA_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_WORKER_THREADS = 8
 DEFAULT_ENABLE_REFRESH = True
+DEFAULT_ALLOW_DELETE = True
 DEFAULT_LOG_ARCHIVE_MAX_SIZE_MB = 500   # 日志归档最大大小，单位为MB
 PROJECT_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
@@ -38,6 +39,7 @@ class Settings:
     max_retries: int = DEFAULT_MAX_RETRIES
     worker_threads: int = DEFAULT_WORKER_THREADS
     enable_refresh: bool = DEFAULT_ENABLE_REFRESH
+    allow_delete: bool = DEFAULT_ALLOW_DELETE
     log_archive_max_size_mb: int = DEFAULT_LOG_ARCHIVE_MAX_SIZE_MB
 
 
@@ -134,6 +136,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         max_retries=_read_int("CPA_MAX_RETRIES", DEFAULT_MAX_RETRIES, env_values, minimum=0, maximum=5),
         worker_threads=_read_int("CPA_WORKER_THREADS", DEFAULT_WORKER_THREADS, env_values, minimum=1),
         enable_refresh=_read_bool("CPA_ENABLE_REFRESH", DEFAULT_ENABLE_REFRESH, env_values),
+        allow_delete=_read_bool("CPA_ALLOW_DELETE", DEFAULT_ALLOW_DELETE, env_values),
         log_archive_max_size_mb=_read_int(
             "CPA_LOG_ARCHIVE_MAX_SIZE_MB",
             DEFAULT_LOG_ARCHIVE_MAX_SIZE_MB,
