@@ -461,8 +461,8 @@ class CPACodexKeeper:
                 email = ((detail or {}).get("email") or "").strip().lower()
                 if email:
                     enriched_token["email"] = email
-            if email and email not in email_map:
-                email_map[email] = enriched_token
+            if email:
+                email_map.setdefault(email, []).append(enriched_token)
         return email_map
 
     def _fill_quota_reached_summary(self, primary_pct, secondary_pct, primary_label, secondary_label):
@@ -508,6 +508,7 @@ class CPACodexKeeper:
                 return self._handle_non_200_status(status, resp_data, logger)
 
             body_info = self.parse_usage_info(resp_data)
+            logger.log("DEBUG", f"原始额度使用信息: {resp_data}", indent=1)
             primary_pct, secondary_pct, primary_label, secondary_label = self._log_usage_summary(body_info, logger)
             reached_summary, quota_reached = self._fill_quota_reached_summary(
                 primary_pct,
@@ -991,7 +992,9 @@ class CPACodexKeeper:
 
         latest_by_email = self._latest_usage_timestamp_by_email(usage_data, after_timestamp=self.last_usage_query_time)
         token_map = self.get_fill_token_map()
-        matched_tokens = [token_map[email] for email in latest_by_email if email in token_map]
+        matched_tokens = []
+        for email in latest_by_email:
+            matched_tokens.extend(token_map.get(email, []))
 
         total = len(matched_tokens)
         if total:
