@@ -119,6 +119,7 @@ class CPACodexKeeper:
         self._tracked_recheck_timers: dict[str, threading.Timer] = {}
         self._tracked_rechecks_started = False
         self.last_usage_query_time: int | None = None
+        self._last_seen_usage_by_email: dict[str, int] = {}
 
     def reset_stats(self):
         with self._stats_lock:
@@ -450,6 +451,19 @@ class CPACodexKeeper:
             if current is None or parsed_timestamp > current:
                 latest_by_email[email] = parsed_timestamp
         return latest_by_email
+
+    def _new_usage_timestamp_by_email(self, usage_data, *, overlap_seconds=0):
+        after_timestamp = None
+        if self.last_usage_query_time is not None:
+            after_timestamp = self.last_usage_query_time - max(0, overlap_seconds)
+        latest_by_email = self._latest_usage_timestamp_by_email(usage_data, after_timestamp=after_timestamp)
+        new_by_email = {}
+        for email, parsed_timestamp in latest_by_email.items():
+            last_seen = self._last_seen_usage_by_email.get(email)
+            if last_seen is not None and parsed_timestamp <= last_seen:
+                continue
+            new_by_email[email] = parsed_timestamp
+        return new_by_email
 
     def get_fill_token_map(self):
         email_map = {}
@@ -871,6 +885,7 @@ class CPACodexKeeper:
             if self.settings.usage_query_interval_seconds == 0
             else f"{self.settings.usage_query_interval_seconds} 秒"
         )
+        fill_interval_display = f"{self.settings.fill_interval_seconds} 秒"
         lines = [
             self.logger.format_log_record("INFO", "=" * 60),
             self.logger.format_log_record("INFO", "启动配置"),
@@ -878,7 +893,8 @@ class CPACodexKeeper:
             self.logger.format_log_record("INFO", f"配额阈值: {self.settings.quota_threshold}%", indent=1),
             self.logger.format_log_record("INFO", f"过期刷新阈值: {self.settings.expiry_threshold_days} 天", indent=1),
             self.logger.format_log_record("INFO", f"主巡检间隔: {self.settings.interval_seconds} 秒", indent=1),
-            self.logger.format_log_record("INFO", f"日志巡检间隔: {usage_query_interval_display}", indent=1),
+            self.logger.format_log_record("INFO", f"日志巡检轮询间隔: {fill_interval_display}", indent=1),
+            self.logger.format_log_record("INFO", f"日志巡检查询窗口: {usage_query_interval_display}", indent=1),
             self.logger.format_log_record("INFO", f"主巡检线程数: {self.settings.worker_threads}", indent=1),
             self.logger.format_log_record("INFO", f"自动刷新: {'开启' if self.settings.enable_refresh else '关闭'}", indent=1),
             self.logger.format_log_record("INFO", f"允许删除账号文件: {'开启' if self.settings.allow_delete else '关闭'}", indent=1),
@@ -986,11 +1002,13 @@ class CPACodexKeeper:
         query_started_at = now
         usage_data = self.get_usage_log()
         if not usage_data:
-            self.last_usage_query_time = query_started_at
             self.log("WARN", "日志巡检未获取到CPA日志数据：本轮无法筛选新增调用账号")
             return "skipped"
 
-        latest_by_email = self._latest_usage_timestamp_by_email(usage_data, after_timestamp=self.last_usage_query_time)
+        latest_by_email = self._new_usage_timestamp_by_email(
+            usage_data,
+            overlap_seconds=self.settings.fill_interval_seconds,
+        )
         token_map = self.get_fill_token_map()
         matched_tokens = []
         for email in latest_by_email:
@@ -1010,6 +1028,7 @@ class CPACodexKeeper:
         else:
             self.log("INFO", "日志巡检未命中新账号：本轮没有需要进一步检查的CPA使用记录")
 
+        self._last_seen_usage_by_email.update(latest_by_email)
         self.last_usage_query_time = query_started_at
         return "processed"
 

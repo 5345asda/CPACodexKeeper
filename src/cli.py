@@ -30,7 +30,7 @@ def main() -> int:
     maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator, logger=logger)
     if args.monitor:
         maintainer._start_tracked_rechecks()
-        maintainer.run_fill_forever(interval_seconds=settings.usage_query_interval_seconds)
+        maintainer.run_fill_forever(interval_seconds=settings.fill_interval_seconds)
         return 0
     if args.daemon:
         maintainer._start_tracked_rechecks()
@@ -38,7 +38,7 @@ def main() -> int:
             fill_maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run, coordinator=coordinator, logger=maintainer.logger)
             fill_thread = threading.Thread(
                 target=fill_maintainer.run_fill_forever,
-                kwargs={"interval_seconds": settings.usage_query_interval_seconds},
+                kwargs={"interval_seconds": settings.fill_interval_seconds},
                 daemon=True,
             )
             fill_thread.start()
