@@ -771,7 +771,17 @@ class CPACodexKeeper:
 
         return None, effective_disabled
 
-    def _apply_refresh_policy(self, name, token_detail, remaining_seconds, remaining_str, logger, *, disabled):
+    def _apply_refresh_policy(
+        self,
+        name,
+        token_detail,
+        remaining_seconds,
+        remaining_str,
+        logger,
+        *,
+        disabled,
+        force_refresh_on_expiry=False,
+    ):
         expiry_threshold_seconds = self.settings.expiry_threshold_days * 86400
         if remaining_seconds > 0 and remaining_seconds < expiry_threshold_seconds:
             if not self.settings.enable_refresh:
@@ -780,6 +790,50 @@ class CPACodexKeeper:
                     f"剩余 {remaining_str} < {self.settings.expiry_threshold_days} 天，但刷新功能已关闭",
                     indent=1,
                 )
+                return
+            if force_refresh_on_expiry:
+                if not self._has_refresh_token(token_detail):
+                    logger.log("INFO", "剩余有效期低于阈值，但缺少 Refresh Token，跳过强制刷新", indent=1)
+                    return
+                originally_disabled = disabled
+                logger.log(
+                    "WARN",
+                    f"剩余 {remaining_str} < {self.settings.expiry_threshold_days} 天，触发强制刷新",
+                    indent=1,
+                )
+                logger.log(
+                    "INFO",
+                    f"强制刷新前账号状态: {'已禁用' if originally_disabled else '正常'}",
+                    indent=1,
+                )
+                if not originally_disabled:
+                    if self.set_disabled_status(name, disabled=True, logger=logger):
+                        logger.log("DISABLE", "强制刷新前已临时禁用账号", indent=1)
+                    else:
+                        logger.log("ERROR", "强制刷新前临时禁用失败", indent=1)
+                        return
+                success, new_data, msg = self.try_refresh(token_detail)
+                if not success:
+                    logger.log("ERROR", f"强制刷新失败: {msg}", indent=1)
+                    if not originally_disabled:
+                        logger.log("WARN", "刷新失败，账号保持禁用，等待人工处理", indent=1)
+                    return
+                if not self.upload_updated_token(name, new_data, logger=logger):
+                    logger.log("ERROR", "强制刷新成功但上传失败", indent=1)
+                    if not originally_disabled:
+                        logger.log("WARN", "上传失败，账号保持禁用，等待人工处理", indent=1)
+                    return
+                if originally_disabled:
+                    logger.log("DISABLE", "强制刷新成功，账号保持原禁用状态", indent=1)
+                else:
+                    if self.set_disabled_status(name, disabled=False, logger=logger):
+                        logger.log("ENABLE", "强制刷新成功，账号已恢复为启用状态", indent=1)
+                    else:
+                        logger.log("ERROR", "强制刷新后恢复启用失败", indent=1)
+                        return
+                _, new_remaining = get_expired_remaining(new_data)
+                logger.log("REFRESH", f"账号刷新成功，新剩余有效期: {format_seconds(new_remaining)}", indent=1)
+                self._inc_stat("refreshed")
                 return
             if not disabled:
                 logger.log(
@@ -807,7 +861,7 @@ class CPACodexKeeper:
         elif remaining_seconds > 0:
             logger.log("INFO", f"过期时间充足 ({remaining_str})", indent=1)
 
-    def process_token(self, token_info, idx, total):
+    def process_token(self, token_info, idx, total, *, force_refresh_on_expiry=None):
         name = token_info.get("name", "unknown")
         logger = TokenLogger(self.logger, idx, total, name)
         try:
@@ -864,6 +918,11 @@ class CPACodexKeeper:
             )
             if quota_result:
                 return quota_result
+            effective_force_refresh = (
+                self.settings.force_refresh_on_expiry
+                if force_refresh_on_expiry is None
+                else force_refresh_on_expiry
+            )
             self._apply_refresh_policy(
                 name,
                 token_detail,
@@ -871,6 +930,7 @@ class CPACodexKeeper:
                 remaining_str,
                 logger,
                 disabled=refresh_disabled,
+                force_refresh_on_expiry=effective_force_refresh,
             )
 
             self._inc_stat("alive")
@@ -904,7 +964,7 @@ class CPACodexKeeper:
         lines.append(self.logger.format_log_record("INFO", "=" * 60))
         self.logger.emit_lines(lines)
 
-    def _process_tokens_with_priority(self, tokens):
+    def _process_tokens_with_priority(self, tokens, *, force_refresh_on_expiry=None):
         total = len(tokens)
         token_iter = iter(enumerate(tokens, 1))
         token_iter_lock = threading.Lock()
@@ -919,7 +979,15 @@ class CPACodexKeeper:
                 self._acquire_priority("full")
                 try:
                     try:
-                        self.process_token(token_info, idx, total)
+                        if force_refresh_on_expiry is None:
+                            self.process_token(token_info, idx, total)
+                        else:
+                            self.process_token(
+                                token_info,
+                                idx,
+                                total,
+                                force_refresh_on_expiry=force_refresh_on_expiry,
+                            )
                     except Exception as exc:
                         token_name = token_info.get("name", "unknown")
                         self.log("ERROR", f"Token 任务异常 ({token_name}): {exc}", indent=1)
@@ -933,7 +1001,7 @@ class CPACodexKeeper:
             for future in as_completed(futures):
                 future.result()
 
-    def run(self):
+    def run(self, *, force_refresh_on_expiry=None):
         self.reset_stats()
         self.log_startup()
         tokens = self.get_token_list()
@@ -949,7 +1017,7 @@ class CPACodexKeeper:
         self.log("INFO", f"主巡检并发设置：{self.settings.worker_threads} 个工作线程")
         self.blank_line()
 
-        self._process_tokens_with_priority(tokens)
+        self._process_tokens_with_priority(tokens, force_refresh_on_expiry=force_refresh_on_expiry)
 
         elapsed = time.time() - start_time
         stats = self._stats_snapshot()
