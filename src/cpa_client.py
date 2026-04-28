@@ -77,7 +77,8 @@ class CPAClient:
     def upload_auth_file(self, name: str, token_data: dict[str, Any]) -> bool:
         result = self._request(
             "POST",
-            f"/v0/management/auth-files?name={name}",
+            "/v0/management/auth-files",
+            params={"name": name},
             data=json.dumps(token_data, ensure_ascii=False),
         )
         return result.status_code == 200
