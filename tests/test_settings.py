@@ -21,12 +21,14 @@ class SettingsTests(unittest.TestCase):
 
     def test_load_settings_reads_required_values(self):
         with patch.dict(os.environ, {"CPA_ENDPOINT": "https://example.com", "CPA_TOKEN": "secret"}, clear=True):
-            settings = load_settings()
+            settings = load_settings(env_file=Path("does-not-exist.env"))
         self.assertEqual(settings.cpa_endpoint, "https://example.com")
         self.assertEqual(settings.cpa_token, "secret")
         self.assertEqual(settings.interval_seconds, 1800)
         self.assertEqual(settings.worker_threads, 8)
         self.assertTrue(settings.enable_refresh)
+        self.assertEqual(settings.ui_host, "127.0.0.1")
+        self.assertEqual(settings.ui_port, 8318)
 
     def test_load_settings_reads_from_project_env_file(self):
         env_file = self._make_env_file("CPA_ENDPOINT=https://env-file.example.com\nCPA_TOKEN=file-secret\nCPA_INTERVAL=120\nCPA_WORKER_THREADS=6\n")

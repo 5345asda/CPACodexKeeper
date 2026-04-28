@@ -7,6 +7,7 @@ from .cpa_client import CPAClient
 from .logging_utils import ConsoleLogger, TokenLogger
 from .models import MaintainerStats, format_window_label
 from .openai_client import OpenAIClient, parse_usage_info
+from .reports import ReportRegistry, TokenReport
 from .settings import Settings
 from .utils import format_seconds, get_expired_remaining, get_expired_remaining_with_status
 
@@ -16,20 +17,41 @@ class CPACodexKeeper:
         self.settings = settings
         self.dry_run = dry_run
         self.logger = ConsoleLogger()
+        snap = settings.snapshot()
         self.cpa_client = CPAClient(
-            settings.cpa_endpoint,
-            settings.cpa_token,
-            proxy=settings.proxy,
-            timeout=settings.cpa_timeout_seconds,
-            max_retries=settings.max_retries,
+            snap.cpa_endpoint,
+            snap.cpa_token,
+            proxy=snap.proxy,
+            timeout=snap.cpa_timeout_seconds,
+            max_retries=snap.max_retries,
         )
         self.openai_client = OpenAIClient(
-            proxy=settings.proxy,
-            timeout=settings.usage_timeout_seconds,
-            max_retries=settings.max_retries,
+            proxy=snap.proxy,
+            timeout=snap.usage_timeout_seconds,
+            max_retries=snap.max_retries,
         )
         self.stats = MaintainerStats()
         self._stats_lock = threading.Lock()
+        self.reports = ReportRegistry()
+        self._run_lock = threading.Lock()
+        self.last_run_started_at: float | None = None
+        self.last_run_finished_at: float | None = None
+        if hasattr(settings, "add_listener"):
+            settings.add_listener(self._handle_settings_update)
+
+    def _handle_settings_update(self, snapshot, changed):
+        if "max_retries" in changed:
+            self.cpa_client.max_retries = snapshot.max_retries
+            self.openai_client.max_retries = snapshot.max_retries
+
+    def is_running(self) -> bool:
+        return self._run_lock.locked()
+
+    def try_acquire_operation_lock(self) -> bool:
+        return self._run_lock.acquire(blocking=False)
+
+    def release_operation_lock(self) -> None:
+        self._run_lock.release()
 
     def reset_stats(self):
         with self._stats_lock:
@@ -203,17 +225,18 @@ class CPACodexKeeper:
         secondary_pct,
         logger,
         *,
+        snap,
         has_refresh_token=True,
         primary_label="primary_window",
         secondary_label="secondary_window",
     ):
-        primary_reached = primary_pct >= self.settings.quota_threshold
+        primary_reached = primary_pct >= snap.quota_threshold
         secondary_present = secondary_pct is not None
-        secondary_reached = secondary_present and secondary_pct >= self.settings.quota_threshold
+        secondary_reached = secondary_present and secondary_pct >= snap.quota_threshold
         effective_disabled = disabled
 
         if secondary_present:
-            below_threshold = primary_pct < self.settings.quota_threshold and secondary_pct < self.settings.quota_threshold
+            below_threshold = primary_pct < snap.quota_threshold and secondary_pct < snap.quota_threshold
             reached_parts = []
             if primary_reached:
                 reached_parts.append(f"{primary_label}额度 {primary_pct}%")
@@ -221,7 +244,7 @@ class CPACodexKeeper:
                 reached_parts.append(f"{secondary_label}额度 {secondary_pct}%")
             reached_summary = "、".join(reached_parts)
         else:
-            below_threshold = primary_pct < self.settings.quota_threshold
+            below_threshold = primary_pct < snap.quota_threshold
             reached_summary = f"{primary_label}额度 {primary_pct}%"
 
         if disabled:
@@ -229,13 +252,13 @@ class CPACodexKeeper:
                 if secondary_present:
                     logger.log(
                         "WARN",
-                        f"已禁用且 {primary_label}/{secondary_label} 额度均已低于 {self.settings.quota_threshold}%，准备启用",
+                        f"已禁用且 {primary_label}/{secondary_label} 额度均已低于 {snap.quota_threshold}%，准备启用",
                         indent=1,
                     )
                 else:
                     logger.log(
                         "WARN",
-                        f"已禁用但{primary_label}额度已降至 {primary_pct}% < {self.settings.quota_threshold}%，准备启用",
+                        f"已禁用但{primary_label}额度已降至 {primary_pct}% < {snap.quota_threshold}%，准备启用",
                         indent=1,
                     )
                 if self.set_disabled_status(name, disabled=False, logger=logger):
@@ -248,12 +271,12 @@ class CPACodexKeeper:
             if not has_refresh_token and (primary_reached or secondary_reached):
                 return self._delete_token_with_reason(
                     name,
-                    f"无 Refresh Token，且{reached_summary} >= {self.settings.quota_threshold}%，准备删除",
+                    f"无 Refresh Token，且{reached_summary} >= {snap.quota_threshold}%，准备删除",
                     logger,
                 ), effective_disabled
             logger.log(
                 "INFO",
-                f"已禁用，{reached_summary} >= {self.settings.quota_threshold}%，保持禁用",
+                f"已禁用，{reached_summary} >= {snap.quota_threshold}%，保持禁用",
                 indent=1,
             )
             return None, effective_disabled
@@ -262,12 +285,12 @@ class CPACodexKeeper:
             if not has_refresh_token:
                 return self._delete_token_with_reason(
                     name,
-                    f"无 Refresh Token，且{reached_summary} >= {self.settings.quota_threshold}%，准备删除",
+                    f"无 Refresh Token，且{reached_summary} >= {snap.quota_threshold}%，准备删除",
                     logger,
                 ), effective_disabled
             logger.log(
                 "WARN",
-                f"{reached_summary} >= {self.settings.quota_threshold}%，准备禁用",
+                f"{reached_summary} >= {snap.quota_threshold}%，准备禁用",
                 indent=1,
             )
             if self.set_disabled_status(name, disabled=True, logger=logger):
@@ -280,24 +303,24 @@ class CPACodexKeeper:
 
         return None, effective_disabled
 
-    def _apply_refresh_policy(self, name, token_detail, remaining_seconds, remaining_str, logger, *, disabled):
-        expiry_threshold_seconds = self.settings.expiry_threshold_days * 86400
+    def _apply_refresh_policy(self, name, token_detail, remaining_seconds, remaining_str, logger, *, snap, disabled):
+        expiry_threshold_seconds = snap.expiry_threshold_days * 86400
         if remaining_seconds > 0 and remaining_seconds < expiry_threshold_seconds:
-            if not self.settings.enable_refresh:
+            if not snap.enable_refresh:
                 logger.log(
                     "INFO",
-                    f"剩余 {remaining_str} < {self.settings.expiry_threshold_days} 天，但刷新功能已关闭",
+                    f"剩余 {remaining_str} < {snap.expiry_threshold_days} 天，但刷新功能已关闭",
                     indent=1,
                 )
                 return
             if not disabled:
                 logger.log(
                     "INFO",
-                    f"剩余 {remaining_str} < {self.settings.expiry_threshold_days} 天，但当前为启用状态，交给 CPA 自动刷新",
+                    f"剩余 {remaining_str} < {snap.expiry_threshold_days} 天，但当前为启用状态，交给 CPA 自动刷新",
                     indent=1,
                 )
                 return
-            logger.log("WARN", f"剩余 {remaining_str} < {self.settings.expiry_threshold_days} 天，准备刷新", indent=1)
+            logger.log("WARN", f"剩余 {remaining_str} < {snap.expiry_threshold_days} 天，准备刷新", indent=1)
             success, new_data, msg = self.try_refresh(token_detail)
             if success:
                 if self.upload_updated_token(name, new_data, logger=logger):
@@ -316,126 +339,204 @@ class CPACodexKeeper:
         elif remaining_seconds > 0:
             logger.log("INFO", f"过期时间充足 ({remaining_str})", indent=1)
 
-    def process_token(self, token_info, idx, total):
+    def process_token(self, token_info, idx, total, *, snap=None):
+        if snap is None:
+            snap = self.settings.snapshot()
         name = token_info.get("name", "unknown")
         logger = TokenLogger(self.logger, idx, total, name)
+        report = self.reports.touch(name)
+        outcome = "skipped"
         try:
             logger.log("INFO", "获取详情...", indent=1)
             token_detail = self.get_token_detail(name)
             if not token_detail:
-                return self._skip_token("获取详情失败", logger)
+                outcome = self._skip_token("获取详情失败", logger)
+                return outcome
 
             disabled, remaining_seconds, remaining_str, expiry_known = self._log_token_details(token_detail, logger)
+            report.email = token_detail.get("email")
+            report.disabled = bool(disabled)
+            report.expiry = token_detail.get("expired") or None
+            report.expiry_remaining_seconds = int(remaining_seconds) if expiry_known else None
+
             cleanup_result = self._apply_non_refreshable_expiry_policy(name, token_detail, remaining_seconds, expiry_known, logger)
             if cleanup_result:
-                return cleanup_result
+                outcome = cleanup_result
+                return outcome
             access_token = token_detail.get("access_token")
             account_id = token_detail.get("account_id")
             if not access_token:
-                return self._skip_token("缺少 access_token", logger)
+                outcome = self._skip_token("缺少 access_token", logger)
+                return outcome
 
             logger.log("INFO", "检测在线状态...", indent=1)
             status, resp_data = self.check_token_live(access_token, account_id)
             if status in (401, 402):
-                return self._handle_invalid_token(name, logger)
+                outcome = self._handle_invalid_token(name, logger)
+                return outcome
             if status is None:
                 detail = resp_data.get("brief", "") if isinstance(resp_data, dict) else str(resp_data)
                 msg = "网络检测失败"
                 if detail:
                     msg += f" | {detail}"
-                return self._skip_token(msg, logger, network_error=True)
+                outcome = self._skip_token(msg, logger, network_error=True)
+                return outcome
             if status != 200:
-                return self._handle_non_200_status(status, resp_data, logger)
+                outcome = self._handle_non_200_status(status, resp_data, logger)
+                return outcome
 
             body_info = self.parse_usage_info(resp_data)
             primary_pct, secondary_pct, primary_label, secondary_label = self._log_usage_summary(body_info, logger)
+            report.plan_type = body_info.get("plan_type")
+            report.primary_used_percent = primary_pct
+            report.secondary_used_percent = secondary_pct
+            report.primary_window_seconds = body_info.get("primary_window_seconds")
+            report.secondary_window_seconds = body_info.get("secondary_window_seconds")
+            report.has_credits = body_info.get("has_credits")
             quota_result, refresh_disabled = self._apply_quota_policy(
                 name,
                 disabled,
                 primary_pct,
                 secondary_pct,
                 logger,
+                snap=snap,
                 has_refresh_token=self._has_refresh_token(token_detail),
                 primary_label=primary_label,
                 secondary_label=secondary_label,
             )
+            report.disabled = bool(refresh_disabled)
             if quota_result:
-                return quota_result
+                outcome = quota_result
+                return outcome
             self._apply_refresh_policy(
                 name,
                 token_detail,
                 remaining_seconds,
                 remaining_str,
                 logger,
+                snap=snap,
                 disabled=refresh_disabled,
             )
 
             self._inc_stat("alive")
             logger.blank_line()
-            return "alive"
+            outcome = "alive"
+            return outcome
         finally:
+            report.last_outcome = self._report_outcome(outcome, logger.entries)
+            report.last_actions = [f"{level}: {msg}" for level, msg in logger.entries]
+            report.last_log_lines = logger.lines()
+            report.disabled = bool(getattr(report, "disabled", False))
+            self.reports.upsert(report)
             logger.flush()
 
+    def _report_outcome(self, default_outcome: str, entries: list[tuple[str, str]]) -> str:
+        if default_outcome in {"dead", "network_error", "skipped"}:
+            return default_outcome
+        levels = [level for level, _ in entries]
+        if "REFRESH" in levels:
+            return "refreshed"
+        if "DISABLE" in levels:
+            return "disabled"
+        if "ENABLE" in levels:
+            return "enabled"
+        return default_outcome
+
+    def process_one(self, name: str) -> TokenReport:
+        """Run process_token for a single token, identified by name. Refreshes
+        the registry entry and returns it. Raises ValueError if not in the codex
+        token list.
+        """
+        tokens = self.get_token_list()
+        match = next((t for t in tokens if t.get("name") == name), None)
+        if match is None:
+            raise ValueError(f"token not found: {name}")
+        snap = self.settings.snapshot()
+        self.process_token(match, 1, 1, snap=snap)
+        report = self.reports.get(name)
+        if report is None:
+            raise RuntimeError(f"report missing after scan: {name}")
+        return report
+
     def log_startup(self):
+        snap = self.settings.snapshot()
         self.logger.divider()
         self.log("INFO", "CPACodexKeeper 启动")
-        self.log("INFO", f"API: {self.settings.cpa_endpoint}")
-        self.log("INFO", f"Quota threshold: {self.settings.quota_threshold}% (disable when reached)")
-        self.log("INFO", f"Expiry threshold: {self.settings.expiry_threshold_days} days (refresh disabled auth when below)")
-        self.log("INFO", f"Refresh enabled: {self.settings.enable_refresh}")
+        self.log("INFO", f"API: {snap.cpa_endpoint}")
+        self.log("INFO", f"Quota threshold: {snap.quota_threshold}% (disable when reached)")
+        self.log("INFO", f"Expiry threshold: {snap.expiry_threshold_days} days (refresh disabled auth when below)")
+        self.log("INFO", f"Refresh enabled: {snap.enable_refresh}")
         if self.dry_run:
             self.log("DRY", "演练模式 (不实际修改)")
         self.logger.divider()
 
     def run(self):
-        self.reset_stats()
-        self.log_startup()
-        tokens = self.get_token_list()
-        if not tokens:
-            self.log("WARN", "未获取到任何 codex Token")
+        if not self._run_lock.acquire(blocking=False):
+            self.log("WARN", "已有巡检正在运行，跳过本次触发")
             return
+        try:
+            self.last_run_started_at = time.time()
+            self.reset_stats()
+            self.log_startup()
+            snap = self.settings.snapshot()
+            tokens = self.get_token_list()
+            if not tokens:
+                self.log("WARN", "未获取到任何 codex Token")
+                # Drop reports for tokens that no longer exist on CPA side.
+                self.reports.replace_all([])
+                return
 
-        self._set_total(len(tokens))
-        random.shuffle(tokens)
-        start_time = time.time()
-        total = len(tokens)
-        self.log("INFO", f"共计: {total} 个 codex Token")
-        self.log("INFO", f"线程数: {self.settings.worker_threads}")
-        self.blank_line()
+            self._set_total(len(tokens))
+            random.shuffle(tokens)
+            start_time = time.time()
+            total = len(tokens)
+            self.log("INFO", f"共计: {total} 个 codex Token")
+            self.log("INFO", f"线程数: {snap.worker_threads}")
+            self.blank_line()
 
-        future_map = {}
-        with ThreadPoolExecutor(max_workers=self.settings.worker_threads) as executor:
-            for idx, token_info in enumerate(tokens, 1):
-                future = executor.submit(self.process_token, token_info, idx, total)
-                future_map[future] = token_info
+            current_names = {t.get("name") for t in tokens}
+            for existing in [r.name for r in self.reports.all()]:
+                if existing not in current_names:
+                    self.reports.remove(existing)
 
-            for future in as_completed(future_map):
-                try:
-                    future.result()
-                except Exception as exc:
-                    token_name = future_map[future].get("name", "unknown")
-                    self.log("ERROR", f"Token 任务异常 ({token_name}): {exc}", indent=1)
-                    self.blank_line()
+            future_map = {}
+            with ThreadPoolExecutor(max_workers=snap.worker_threads) as executor:
+                for idx, token_info in enumerate(tokens, 1):
+                    future = executor.submit(self.process_token, token_info, idx, total, snap=snap)
+                    future_map[future] = token_info
 
-        elapsed = time.time() - start_time
-        stats = self._stats_snapshot()
-        self.logger.divider()
-        self.log("INFO", "执行完成")
-        self.log("INFO", f"耗时: {elapsed:.1f} 秒")
-        self.log("INFO", "统计:")
-        self.log("INFO", f"- 总计: {stats['total']}", indent=1)
-        self.log("INFO", f"- 存活: {stats['alive']}", indent=1)
-        self.log("INFO", f"- 死号(已删除): {stats['dead']}", indent=1)
-        self.log("INFO", f"- 已禁用: {stats['disabled']}", indent=1)
-        self.log("INFO", f"- 已启用: {stats['enabled']}", indent=1)
-        self.log("INFO", f"- 已刷新: {stats['refreshed']}", indent=1)
-        self.log("INFO", f"- 跳过: {stats['skipped']}", indent=1)
-        self.log("INFO", f"- 网络失败: {stats['network_error']}", indent=1)
-        self.logger.divider()
+                for future in as_completed(future_map):
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        token_name = future_map[future].get("name", "unknown")
+                        self.log("ERROR", f"Token 任务异常 ({token_name}): {exc}", indent=1)
+                        self.blank_line()
 
-    def run_forever(self, interval_seconds=1800):
+            elapsed = time.time() - start_time
+            stats = self._stats_snapshot()
+            self.logger.divider()
+            self.log("INFO", "执行完成")
+            self.log("INFO", f"耗时: {elapsed:.1f} 秒")
+            self.log("INFO", "统计:")
+            self.log("INFO", f"- 总计: {stats['total']}", indent=1)
+            self.log("INFO", f"- 存活: {stats['alive']}", indent=1)
+            self.log("INFO", f"- 死号(已删除): {stats['dead']}", indent=1)
+            self.log("INFO", f"- 已禁用: {stats['disabled']}", indent=1)
+            self.log("INFO", f"- 已启用: {stats['enabled']}", indent=1)
+            self.log("INFO", f"- 已刷新: {stats['refreshed']}", indent=1)
+            self.log("INFO", f"- 跳过: {stats['skipped']}", indent=1)
+            self.log("INFO", f"- 网络失败: {stats['network_error']}", indent=1)
+            self.logger.divider()
+        finally:
+            self.last_run_finished_at = time.time()
+            self._run_lock.release()
+
+    def run_forever(self, interval_seconds=None):
         round_no = 0
-        self.log("INFO", f"守护模式启动，执行间隔: {interval_seconds} 秒")
+        snap = self.settings.snapshot()
+        initial_interval = interval_seconds if interval_seconds is not None else snap.interval_seconds
+        self.log("INFO", f"守护模式启动，执行间隔: {initial_interval} 秒")
         while True:
             round_no += 1
             self.log("INFO", f"开始第 {round_no} 轮巡检")
@@ -446,5 +547,6 @@ class CPACodexKeeper:
                 raise
             except Exception as exc:
                 self.log("ERROR", f"第 {round_no} 轮巡检异常: {exc}")
-            self.log("INFO", f"等待 {interval_seconds} 秒后开始下一轮")
-            time.sleep(interval_seconds)
+            wait = interval_seconds if interval_seconds is not None else self.settings.snapshot().interval_seconds
+            self.log("INFO", f"等待 {wait} 秒后开始下一轮")
+            time.sleep(wait)

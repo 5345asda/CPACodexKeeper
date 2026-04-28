@@ -15,6 +15,7 @@ CPACodexKeeper 是一个用于**巡检和维护 CPA 管理端中的 codex token*
 - 检查 token 是否失效
 - 按实际返回的 quota 窗口自动禁用或启用
 - 可选地刷新已禁用且即将过期的 token
+- 提供轻量 Web 管理面板查看 token 状态、触发巡检和调整策略
 - 支持 `.env` 配置、Docker 和 GitHub Actions CI
 
 ## 适合谁用
@@ -32,7 +33,7 @@ CPACodexKeeper 是一个用于**巡检和维护 CPA 管理端中的 codex token*
 
 ```bash
 cp .env.example .env
-python main.py --once
+python3 main.py --once
 ```
 
 更多配置和运行方式见下文。
@@ -142,6 +143,10 @@ cp .env.example .env
 - `CPA_USAGE_TIMEOUT`：OpenAI usage 请求超时秒数，默认 `15`
 - `CPA_MAX_RETRIES`：临时网络 / 5xx 错误重试次数，默认 `2`
 - `CPA_WORKER_THREADS`：单轮巡检的并发线程数，默认 `8`
+- `CPA_UI_HOST`：管理面板监听地址，默认 `127.0.0.1`
+- `CPA_UI_PORT`：管理面板监听端口，默认 `8318`
+- `CPA_UI_TOKEN`：管理面板 Bearer 鉴权 token，留空则不启用鉴权
+- `CPA_RUNTIME_OVERRIDES`：UI 写入运行时配置覆盖的 JSON 文件路径，默认 `runtime.json`
 
 推荐直接参考 `.env.example` 中的中英双语注释填写。
 
@@ -154,7 +159,7 @@ cp .env.example .env
 ### 环境要求
 
 - Python 3.11+
-- 依赖：`curl-cffi`
+- 依赖：`curl-cffi`、`fastapi`、`uvicorn`、`httpx`
 
 安装依赖：
 
@@ -168,7 +173,7 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-python main.py --once
+python3 main.py --once
 ```
 
 ### 守护模式
@@ -176,7 +181,7 @@ python main.py --once
 适合持续运行：
 
 ```bash
-python main.py
+python3 main.py
 ```
 
 ### 演练模式
@@ -184,12 +189,69 @@ python main.py
 不会真正删除、禁用、启用或上传更新：
 
 ```bash
-python main.py --once --dry-run
+python3 main.py --once --dry-run
 ```
 
 ---
 
-## 6. Docker 部署
+## 6. 管理面板
+
+守护模式默认会同时启动 Keeper UI：
+
+```bash
+python3 main.py
+```
+
+默认访问地址：
+
+```text
+http://localhost:8318/
+```
+
+如果设置了 `CPA_UI_TOKEN`，所有 `/api/*` 路由都需要 `Authorization: Bearer <token>`；静态页面右上角的钥匙按钮可以保存这个 token 到浏览器 `localStorage`。如果没有设置 `CPA_UI_TOKEN`，面板只读，所有巡检、配置修改和 token 操作都会被拒绝。
+
+安全建议：直接在服务器上运行时保持 `CPA_UI_HOST=127.0.0.1`，再通过 Cloudflare Tunnel、Nginx 或 SSH 隧道转发访问；如果需要在面板里执行任何写操作，请务必设置 `CPA_UI_TOKEN`。Docker Compose 会让容器内部监听 `0.0.0.0`，但宿主机端口只绑定到 `127.0.0.1:8318`。
+
+面板提供：
+
+- 最新一轮 token 状态、配额、剩余有效期和最近动作
+- 手动触发整轮巡检或单 token 重扫
+- 手动禁用、启用、刷新、删除 token
+- 编辑 Keeper 配置并持久化到 `CPA_RUNTIME_OVERRIDES`
+
+配置分两类：
+
+- policy 字段：下一轮巡检生效，包括 `quota_threshold`、`expiry_threshold_days`、`enable_refresh`、`worker_threads`、`interval_seconds`、`max_retries`
+- transport 字段：需要重启容器生效，包括 `cpa_endpoint`、`cpa_token`、`proxy`、`cpa_timeout_seconds`、`usage_timeout_seconds`、`ui_host`、`ui_port`、`ui_token`
+
+如果只想跑后台巡检、不启动面板：
+
+```bash
+python3 main.py --no-web
+```
+
+### CLIProxyAPI 管理页入口
+
+项目不 fork 上游 CLIProxyAPI 面板，只提供本地注入脚本。先在 CLIProxyAPI 配置中关闭面板自动更新：
+
+```yaml
+remote-management:
+  disable-control-panel: false
+  disable-auto-update-panel: true
+```
+
+然后找到 CLIProxyAPI 下载的 `management.html` 并注入 Keeper 悬浮按钮。Homebrew 默认通常在配置文件同级的 `static/` 目录：
+
+```bash
+find /opt/homebrew/etc -name management.html -print 2>/dev/null
+bash panel-overlay/apply.sh /opt/homebrew/etc/static/management.html
+```
+
+Docker 场景推荐设置 `MANAGEMENT_STATIC_PATH` 到持久化 volume 后再注入。详细步骤见 `panel-overlay/README.md`。
+
+---
+
+## 7. Docker 部署
 
 项目支持通过 Docker 运行，配置同样只来自 `.env` / 环境变量。
 
@@ -204,8 +266,10 @@ docker build -t cpacodexkeeper .
 ```bash
 docker run -d \
   --name cpacodexkeeper \
+  -p 127.0.0.1:8318:8318 \
   -e CPA_ENDPOINT=https://your-cpa-endpoint \
   -e CPA_TOKEN=your-management-token \
+  -e CPA_UI_HOST=0.0.0.0 \
   -e CPA_INTERVAL=1800 \
   cpacodexkeeper
 ```
@@ -226,7 +290,7 @@ docker compose up -d --build
 
 ---
 
-## 7. 输出与行为说明
+## 8. 输出与行为说明
 
 程序会为每个 token 输出一段巡检日志，通常包含：
 
@@ -255,7 +319,7 @@ docker compose up -d --build
 
 ---
 
-## 8. 健壮性设计
+## 9. 健壮性设计
 
 当前版本已经补了几项关键保护：
 
@@ -269,7 +333,7 @@ docker compose up -d --build
 
 ---
 
-## 9. 开发辅助
+## 10. 开发辅助
 
 项目内置了 `justfile`，方便统一常用命令。
 
@@ -281,6 +345,9 @@ just test
 just run-once
 just dry-run
 just daemon
+just daemon-no-web
+just web
+just web-dev
 just docker-build
 just docker-up
 just docker-down
@@ -288,12 +355,12 @@ just docker-down
 
 ---
 
-## 10. 测试与 CI
+## 11. 测试与 CI
 
 ### 本地测试
 
 ```bash
-python -m unittest discover -s tests
+python3 -m unittest discover -s tests
 ```
 
 或者：
@@ -317,7 +384,7 @@ just test
 
 ---
 
-## 11. 项目结构
+## 12. 项目结构
 
 ```text
 CPACodexKeeper/
@@ -328,8 +395,12 @@ CPACodexKeeper/
 │  ├─ maintainer.py
 │  ├─ models.py
 │  ├─ openai_client.py
+│  ├─ reports.py
 │  ├─ settings.py
+│  ├─ web.py
 │  └─ utils.py
+├─ static/
+├─ panel-overlay/
 ├─ tests/
 ├─ .env.example
 ├─ docker-compose.yml
@@ -342,7 +413,7 @@ CPACodexKeeper/
 
 ---
 
-## 12. 故障排查
+## 13. 故障排查
 
 ### 启动时报配置错误
 
@@ -372,7 +443,7 @@ CPACodexKeeper/
 
 ---
 
-## 13. 适用范围说明
+## 14. 适用范围说明
 
 这个项目面向**已授权的内部维护场景**，适合：
 

@@ -1,1 +1,4 @@
 curl-cffi>=0.7.0
+fastapi>=0.110
+httpx>=0.28
+uvicorn[standard]>=0.27

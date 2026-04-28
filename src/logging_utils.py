@@ -51,19 +51,28 @@ class ConsoleLogger:
 
 
 class TokenLogger:
-    """单个 Token 处理过程的日志收集器，收集完成后一次性输出。"""
+    """单个 Token 处理过程的日志收集器，收集完成后一次性输出。
+
+    Also records structured `entries: list[(level, message)]` for callers that
+    want to surface the per-token actions in a UI or report.
+    """
 
     def __init__(self, logger: ConsoleLogger, idx: int, total: int, name: str):
         self._logger = logger
         self._buffer: list[str] = []
         self._buffer.append(f"[{idx}/{total}] {name}")
+        self.entries: list[tuple[str, str]] = []
 
     def log(self, level: str, message: str, indent: int = 0) -> None:
         prefix = ConsoleLogger.PREFIX_MAP.get(level, f"[{level}]")
         self._buffer.append(f"{'    ' * indent}{prefix} {message}")
+        self.entries.append((level, message))
 
     def blank_line(self) -> None:
         self._buffer.append("")
+
+    def lines(self) -> list[str]:
+        return list(self._buffer)
 
     def flush(self) -> None:
         """一次性输出收集的所有日志。"""
