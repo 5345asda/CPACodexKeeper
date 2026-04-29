@@ -8,3 +8,5 @@ logs/
 *.egg-info/
 dist/
 build/
+/.history
+disabled_accounts.json
