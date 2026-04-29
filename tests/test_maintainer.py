@@ -124,6 +124,10 @@ class MaintainerTests(unittest.TestCase):
         self.assertEqual(args, ("t2",))
         self.assertEqual(kwargs["disabled"], True)
         self.assertEqual(self.maintainer.stats.disabled, 1)
+        report = self.maintainer.reports.get("t2")
+        self.assertIsNotNone(report)
+        self.assertTrue(report.disabled)
+        self.assertEqual(report.last_outcome, "disabled")
 
     def test_process_token_disables_when_primary_quota_reaches_threshold_even_if_weekly_is_below(self):
         self.maintainer.get_token_detail = Mock(return_value={
@@ -181,6 +185,10 @@ class MaintainerTests(unittest.TestCase):
         self.assertEqual(args, ("t3",))
         self.assertEqual(kwargs["disabled"], False)
         self.assertEqual(self.maintainer.stats.enabled, 1)
+        report = self.maintainer.reports.get("t3")
+        self.assertIsNotNone(report)
+        self.assertFalse(report.disabled)
+        self.assertEqual(report.last_outcome, "enabled")
 
     def test_process_token_keeps_disabled_when_primary_quota_still_reaches_threshold(self):
         self.maintainer.get_token_detail = Mock(return_value={
@@ -242,6 +250,10 @@ class MaintainerTests(unittest.TestCase):
         self.maintainer.upload_updated_token.assert_called_once()
         self.maintainer.set_disabled_status.assert_called_once_with("t4", disabled=True, logger=ANY)
         self.assertEqual(self.maintainer.stats.refreshed, 1)
+        report = self.maintainer.reports.get("t4")
+        self.assertIsNotNone(report)
+        self.assertTrue(report.disabled)
+        self.assertEqual(report.last_outcome, "refreshed")
 
     def test_process_token_logs_week_label_when_primary_window_is_weekly(self):
         self.maintainer.get_token_detail = Mock(return_value={
@@ -508,9 +520,9 @@ class MaintainerTests(unittest.TestCase):
 
         futures = []
 
-        def submit_side_effect(fn, token_info, idx, total):
+        def submit_side_effect(fn, token_info, idx, total, **kwargs):
             future = Future()
-            future.set_result(fn(token_info, idx, total))
+            future.set_result(fn(token_info, idx, total, **kwargs))
             futures.append(future)
             return future
 
@@ -523,9 +535,34 @@ class MaintainerTests(unittest.TestCase):
 
         executor_cls.assert_called_once_with(max_workers=6)
         self.assertEqual(executor.submit.call_count, 3)
-        self.maintainer.process_token.assert_any_call({"name": "t1"}, 1, 3)
-        self.maintainer.process_token.assert_any_call({"name": "t2"}, 2, 3)
-        self.maintainer.process_token.assert_any_call({"name": "t3"}, 3, 3)
+        self.maintainer.process_token.assert_any_call({"name": "t1"}, 1, 3, snap=ANY)
+        self.maintainer.process_token.assert_any_call({"name": "t2"}, 2, 3, snap=ANY)
+        self.maintainer.process_token.assert_any_call({"name": "t3"}, 3, 3, snap=ANY)
+
+    @patch("src.maintainer.random.shuffle", side_effect=lambda seq: None)
+    @patch("src.maintainer.as_completed")
+    @patch("src.maintainer.ThreadPoolExecutor")
+    def test_run_passes_same_settings_snapshot_to_all_workers(self, executor_cls, as_completed_mock, _shuffle_mock):
+        tokens = [{"name": "t1"}, {"name": "t2"}]
+        self.maintainer.get_token_list = Mock(return_value=tokens)
+        self.maintainer.log_startup = Mock()
+        seen_snapshots = []
+
+        def submit_side_effect(fn, token_info, idx, total, **kwargs):
+            future = Future()
+            seen_snapshots.append(kwargs["snap"])
+            future.set_result(fn(token_info, idx, total, **kwargs))
+            return future
+
+        executor = executor_cls.return_value.__enter__.return_value
+        executor.submit.side_effect = submit_side_effect
+        as_completed_mock.side_effect = lambda items: list(items)
+        self.maintainer.process_token = Mock(return_value="alive")
+
+        self.maintainer.run()
+
+        self.assertEqual(len(seen_snapshots), 2)
+        self.assertIs(seen_snapshots[0], seen_snapshots[1])
 
     @patch("src.maintainer.random.shuffle", side_effect=lambda seq: None)
     @patch("src.maintainer.as_completed")
@@ -538,10 +575,10 @@ class MaintainerTests(unittest.TestCase):
 
         futures = []
 
-        def submit_side_effect(fn, token_info, idx, total):
+        def submit_side_effect(fn, token_info, idx, total, **kwargs):
             future = Future()
             try:
-                future.set_result(fn(token_info, idx, total))
+                future.set_result(fn(token_info, idx, total, **kwargs))
             except Exception as exc:
                 future.set_exception(exc)
             futures.append(future)
@@ -551,7 +588,7 @@ class MaintainerTests(unittest.TestCase):
         executor.submit.side_effect = submit_side_effect
         as_completed_mock.side_effect = lambda items: list(items)
 
-        def process_side_effect(token_info, idx, total):
+        def process_side_effect(token_info, idx, total, **kwargs):
             if token_info["name"] == "boom":
                 raise RuntimeError("unexpected boom")
             self.maintainer.stats.alive += 1
@@ -573,16 +610,16 @@ class MaintainerTests(unittest.TestCase):
         self.maintainer.get_token_list = Mock(return_value=tokens)
         self.maintainer.log_startup = Mock()
 
-        def submit_side_effect(fn, token_info, idx, total):
+        def submit_side_effect(fn, token_info, idx, total, **kwargs):
             future = Future()
-            future.set_result(fn(token_info, idx, total))
+            future.set_result(fn(token_info, idx, total, **kwargs))
             return future
 
         executor = executor_cls.return_value.__enter__.return_value
         executor.submit.side_effect = submit_side_effect
         as_completed_mock.side_effect = lambda items: list(items)
 
-        def process_side_effect(token_info, idx, total):
+        def process_side_effect(token_info, idx, total, **kwargs):
             if token_info["name"] == "t1":
                 self.maintainer.stats.alive += 1
             else:
@@ -607,9 +644,9 @@ class MaintainerTests(unittest.TestCase):
         self.maintainer.log_startup = Mock()
         self.maintainer.log = Mock()
 
-        def submit_side_effect(fn, token_info, idx, total):
+        def submit_side_effect(fn, token_info, idx, total, **kwargs):
             future = Future()
-            future.set_result(fn(token_info, idx, total))
+            future.set_result(fn(token_info, idx, total, **kwargs))
             return future
 
         executor = executor_cls.return_value.__enter__.return_value

@@ -3,6 +3,8 @@ services:
     build: .
     container_name: cpacodexkeeper
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CPA_UI_PORT:-8318}:${CPA_UI_PORT:-8318}"
     environment:
       CPA_ENDPOINT: ${CPA_ENDPOINT}
       CPA_TOKEN: ${CPA_TOKEN}
@@ -15,3 +17,9 @@ services:
       CPA_USAGE_TIMEOUT: ${CPA_USAGE_TIMEOUT:-15}
       CPA_MAX_RETRIES: ${CPA_MAX_RETRIES:-2}
       CPA_WORKER_THREADS: ${CPA_WORKER_THREADS:-8}
+      CPA_UI_HOST: 0.0.0.0
+      CPA_UI_PORT: ${CPA_UI_PORT:-8318}
+      CPA_UI_TOKEN: ${CPA_UI_TOKEN:-}
+      CPA_RUNTIME_OVERRIDES: /data/runtime.json
+    volumes:
+      - ./runtime-data:/data

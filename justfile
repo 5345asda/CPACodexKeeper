@@ -1,19 +1,28 @@
 set shell := ["bash", "-cu"]
 
 install:
-    python -m pip install -r requirements.txt
+    python3 -m pip install -r requirements.txt
 
 test:
-    python -m unittest discover -s tests
+    python3 -m unittest discover -s tests
 
 run-once:
-    python main.py --once
+    python3 main.py --once
 
 dry-run:
-    python main.py --once --dry-run
+    python3 main.py --once --dry-run
 
 daemon:
-    python main.py
+    python3 main.py
+
+daemon-no-web:
+    python3 main.py --no-web
+
+web:
+    python3 main.py
+
+web-dev:
+    python3 main.py --dry-run
 
 docker-build:
     docker build -t cpacodexkeeper .

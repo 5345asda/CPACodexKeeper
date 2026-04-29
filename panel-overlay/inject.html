@@ -1,0 +1,52 @@
+<script>
+(function () {
+  const STORAGE_KEY = "cpa-keeper-url";
+  const DEFAULT_URL = "http://" + window.location.hostname + ":8318/";
+
+  function getUrl() {
+    return localStorage.getItem(STORAGE_KEY) || DEFAULT_URL;
+  }
+
+  function setUrl() {
+    const next = prompt("CPACodexKeeper UI URL", getUrl());
+    if (next === null) return;
+    if (next.trim()) localStorage.setItem(STORAGE_KEY, next.trim());
+    else localStorage.removeItem(STORAGE_KEY);
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.title = "打开 CPACodexKeeper（右键修改 URL）";
+  button.textContent = "🛠 Keeper";
+  button.style.cssText = [
+    "position:fixed",
+    "right:20px",
+    "bottom:20px",
+    "z-index:99999",
+    "padding:10px 14px",
+    "background:#3376CD",
+    "color:#fff",
+    "border:none",
+    "border-radius:999px",
+    "font:600 13px/1 -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif",
+    "box-shadow:0 6px 16px rgba(51,118,205,0.28)",
+    "cursor:pointer",
+  ].join(";");
+  button.addEventListener("click", function () {
+    window.open(getUrl(), "_blank", "noopener");
+  });
+  button.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+    setUrl();
+  });
+
+  function attach() {
+    document.body && document.body.appendChild(button);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", attach);
+  } else {
+    attach();
+  }
+})();
+</script>

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CPACodexKeeper</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark">⌬</span>
+        <div>
+          <h1>CPACodexKeeper</h1>
+          <p id="last-run-meta">从未巡检</p>
+        </div>
+        <span class="brand-tag" id="dry-run-tag" hidden>dry-run</span>
+      </div>
+      <div class="header-actions">
+        <button id="scan-all" class="btn btn-primary">立即巡检</button>
+        <button id="open-config" class="btn btn-outline btn-icon" title="配置" aria-label="配置">⚙</button>
+        <button id="set-token" class="btn btn-outline btn-icon" title="设置 UI Token" aria-label="设置 UI Token">🔑</button>
+      </div>
+    </header>
+
+    <section class="card stats-card">
+      <div class="card-header compact">
+        <h2>巡检概览</h2>
+      </div>
+      <div class="stats" id="stats"></div>
+    </section>
+
+    <main class="card token-card">
+      <div class="card-header">
+        <h2>Token 状态</h2>
+      </div>
+      <div class="toolbar">
+        <input id="token-search" type="text" class="search-input" placeholder="搜索名称 / 邮箱 / 最近动作..." autocomplete="off" />
+        <select id="status-filter" aria-label="筛选状态">
+          <option value="all">全部状态</option>
+          <option value="alive">正常</option>
+          <option value="disabled">已禁用</option>
+          <option value="dead">已删除</option>
+          <option value="network_error">网络错误</option>
+          <option value="skipped">跳过</option>
+          <option value="refreshed">已刷新</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table class="tokens">
+          <thead>
+            <tr>
+              <th></th>
+              <th>名称</th>
+              <th>邮箱</th>
+              <th>状态</th>
+              <th>Plan</th>
+              <th class="num">主额度</th>
+              <th class="num">次额度</th>
+              <th>剩余</th>
+              <th>最近动作</th>
+              <th class="actions-col">操作</th>
+            </tr>
+          </thead>
+          <tbody id="token-rows">
+            <tr><td colspan="10" class="empty">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="config-drawer" class="drawer" hidden>
+    <div class="drawer-head">
+      <h2>Keeper 配置</h2>
+      <button id="close-config" class="btn-modal-close" aria-label="关闭配置">&times;</button>
+    </div>
+    <p class="drawer-hint">
+      <strong>policy</strong> 字段保存后下一轮巡检立即生效；
+      <strong>transport</strong> 字段需重启容器才会生效。
+      所有变更持久化到 <code id="overrides-path"></code>
+    </p>
+    <form id="config-form" class="config-form"></form>
+  </aside>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
