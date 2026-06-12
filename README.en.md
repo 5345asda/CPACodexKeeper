@@ -59,18 +59,22 @@ Each inspection round follows this sequence:
 
 1. fetch the token list from the CPA management API
 2. keep only tokens where `type=codex`
-3. fetch token details one by one
-4. read expiry information and remaining lifetime
-5. call the OpenAI usage endpoint
-6. delete the token if usage returns `401` or `402`, meaning the token is invalid or the workspace is deactivated
-7. if usage returns two quota windows, evaluate them by their actual meaning
-8. disable when either window reaches the threshold, and re-enable only when both drop below it
-9. if the token has **no `refresh_token`** and is already expired, delete it directly
-10. if the token has **no `refresh_token`** and the checked quota reaches the threshold, delete it directly
-11. if automatic refresh is explicitly enabled and the token is still disabled after quota handling and close to expiry, refresh it
-12. upload the refreshed token payload back to CPA
+3. if list metadata shows `status=error` and the error type, code, and message all match the auto-delete rule, delete it first and skip detail download
+4. if list metadata shows `status=error` and the error type matches the auto-disable rule, disable it first and skip detail download
+5. fetch token details one by one
+6. read expiry information and remaining lifetime
+7. call the OpenAI usage endpoint
+8. delete the token if usage returns `401` or `402`, meaning the token is invalid or the workspace is deactivated
+9. if usage returns two quota windows, evaluate them by their actual meaning
+10. disable when either window reaches the threshold, and re-enable only when both drop below it
+11. if the token has **no `refresh_token`** and is already expired, delete it directly
+12. if the token has **no `refresh_token`** and the checked quota reaches the threshold, delete it directly
+13. if automatic refresh is explicitly enabled and the token is still disabled after quota handling and close to expiry, refresh it
+14. upload the refreshed token payload back to CPA
 
 This process is **round-based with intra-round concurrency**. One full round still completes before the next round starts, but multiple tokens can be inspected concurrently within the same round.
+
+Daemon mode also starts a lightweight error sweep. By default, every 60 seconds it reads only CPA list metadata. It does not download token details, call OpenAI usage, refresh, or re-enable tokens. By default it deletes only authentication-invalidated errors where `type=authentication_error`, `code=auth_unavailable`, and the message contains `invalidated`; it disables quota errors such as `type=usage_limit_reached`. This quickly handles frontend red-box errors without conflicting with the full maintenance loop.
 
 ---
 
@@ -137,6 +141,12 @@ Then edit `.env`.
 - `CPA_QUOTA_THRESHOLD`: disable threshold, default `100`
 - `CPA_EXPIRY_THRESHOLD_DAYS`: refresh threshold in days for disabled tokens, default `3`
 - `CPA_ENABLE_REFRESH`: whether automatic refresh for disabled tokens is enabled, default `true`
+- `CPA_ERROR_SWEEP_ENABLED`: whether daemon mode runs the lightweight error sweep, default `true`
+- `CPA_ERROR_SWEEP_INTERVAL`: error sweep interval in seconds, default `60`
+- `CPA_ERROR_DISABLE_TYPES`: comma-separated list-level error types that trigger auto-disable, default `usage_limit_reached`
+- `CPA_ERROR_DELETE_TYPES`: comma-separated list-level error types that trigger auto-delete, default `authentication_error`
+- `CPA_ERROR_DELETE_CODES`: comma-separated list-level error codes that trigger auto-delete, default `auth_unavailable`
+- `CPA_ERROR_DELETE_MESSAGE_KEYWORDS`: comma-separated message keywords that trigger auto-delete, default `invalidated`
 - `CPA_HTTP_TIMEOUT`: timeout for CPA API requests, default `30`
 - `CPA_USAGE_TIMEOUT`: timeout for OpenAI usage requests, default `15`
 - `CPA_MAX_RETRIES`: retry count for transient network / 5xx failures, default `2`
@@ -145,6 +155,8 @@ Then edit `.env`.
 The `.env.example` file already includes bilingual comments for direct editing.
 
 Automatic refresh is enabled by default, but the keeper still refreshes only tokens that remain disabled after quota handling; enabled tokens are left to CPA's own auto-refresh logic. If you need to avoid competing with another writer rotating the same shared `refresh_token`, set it to `false` in `.env`.
+
+The error sweep is enabled by default. It applies delete rules before disable rules, and never enables or refreshes tokens. The default delete rule requires error type, code, and message keyword matches so transient auth-pool unavailability is not deleted. The error sweep and the full maintenance round share one maintenance lock; delete and status writes also go through the same serialized mutation path.
 
 ---
 

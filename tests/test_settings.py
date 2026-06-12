@@ -27,15 +27,38 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.interval_seconds, 1800)
         self.assertEqual(settings.worker_threads, 8)
         self.assertTrue(settings.enable_refresh)
+        self.assertTrue(settings.error_sweep_enabled)
+        self.assertEqual(settings.error_sweep_interval_seconds, 60)
+        self.assertEqual(settings.error_disable_types, frozenset({"usage_limit_reached"}))
+        self.assertEqual(settings.error_delete_types, frozenset({"authentication_error"}))
+        self.assertEqual(settings.error_delete_codes, frozenset({"auth_unavailable"}))
+        self.assertEqual(settings.error_delete_message_keywords, frozenset({"invalidated"}))
 
     def test_load_settings_reads_from_project_env_file(self):
-        env_file = self._make_env_file("CPA_ENDPOINT=https://env-file.example.com\nCPA_TOKEN=file-secret\nCPA_INTERVAL=120\nCPA_WORKER_THREADS=6\n")
+        env_file = self._make_env_file(
+            "CPA_ENDPOINT=https://env-file.example.com\n"
+            "CPA_TOKEN=file-secret\n"
+            "CPA_INTERVAL=120\n"
+            "CPA_WORKER_THREADS=6\n"
+            "CPA_ERROR_SWEEP_ENABLED=false\n"
+            "CPA_ERROR_SWEEP_INTERVAL=30\n"
+            "CPA_ERROR_DISABLE_TYPES=usage_limit_reached,rate_limit_exceeded\n"
+            "CPA_ERROR_DELETE_TYPES=authentication_error,oauth_error\n"
+            "CPA_ERROR_DELETE_CODES=auth_unavailable,invalid_grant\n"
+            "CPA_ERROR_DELETE_MESSAGE_KEYWORDS=invalidated,revoked\n"
+        )
         with patch.dict(os.environ, {}, clear=True):
             settings = load_settings(env_file=env_file)
         self.assertEqual(settings.cpa_endpoint, "https://env-file.example.com")
         self.assertEqual(settings.cpa_token, "file-secret")
         self.assertEqual(settings.interval_seconds, 120)
         self.assertEqual(settings.worker_threads, 6)
+        self.assertFalse(settings.error_sweep_enabled)
+        self.assertEqual(settings.error_sweep_interval_seconds, 30)
+        self.assertEqual(settings.error_disable_types, frozenset({"usage_limit_reached", "rate_limit_exceeded"}))
+        self.assertEqual(settings.error_delete_types, frozenset({"authentication_error", "oauth_error"}))
+        self.assertEqual(settings.error_delete_codes, frozenset({"auth_unavailable", "invalid_grant"}))
+        self.assertEqual(settings.error_delete_message_keywords, frozenset({"invalidated", "revoked"}))
 
     def test_environment_variables_override_project_env_file(self):
         env_file = self._make_env_file("CPA_ENDPOINT=https://env-file.example.com\nCPA_TOKEN=file-secret\nCPA_WORKER_THREADS=4\n")

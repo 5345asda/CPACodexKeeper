@@ -11,6 +11,12 @@ DEFAULT_CPA_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_WORKER_THREADS = 8
 DEFAULT_ENABLE_REFRESH = True
+DEFAULT_ERROR_SWEEP_ENABLED = True
+DEFAULT_ERROR_SWEEP_INTERVAL_SECONDS = 60
+DEFAULT_ERROR_DISABLE_TYPES = frozenset({"usage_limit_reached"})
+DEFAULT_ERROR_DELETE_TYPES = frozenset({"authentication_error"})
+DEFAULT_ERROR_DELETE_CODES = frozenset({"auth_unavailable"})
+DEFAULT_ERROR_DELETE_MESSAGE_KEYWORDS = frozenset({"invalidated"})
 PROJECT_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
 
@@ -31,6 +37,12 @@ class Settings:
     max_retries: int = DEFAULT_MAX_RETRIES
     worker_threads: int = DEFAULT_WORKER_THREADS
     enable_refresh: bool = DEFAULT_ENABLE_REFRESH
+    error_sweep_enabled: bool = DEFAULT_ERROR_SWEEP_ENABLED
+    error_sweep_interval_seconds: int = DEFAULT_ERROR_SWEEP_INTERVAL_SECONDS
+    error_disable_types: frozenset[str] = DEFAULT_ERROR_DISABLE_TYPES
+    error_delete_types: frozenset[str] = DEFAULT_ERROR_DELETE_TYPES
+    error_delete_codes: frozenset[str] = DEFAULT_ERROR_DELETE_CODES
+    error_delete_message_keywords: frozenset[str] = DEFAULT_ERROR_DELETE_MESSAGE_KEYWORDS
 
 
 def _read_project_env_file(env_file: Path | None = None) -> dict[str, str]:
@@ -88,6 +100,14 @@ def _read_bool(name: str, default: bool, env_values: dict[str, str]) -> bool:
     raise SettingsError(f"{name} must be a boolean")
 
 
+def _read_csv_set(name: str, default: frozenset[str], env_values: dict[str, str]) -> frozenset[str]:
+    raw = _get_config_value(name, env_values)
+    if raw in (None, ""):
+        return default
+    values = frozenset(part.strip() for part in raw.split(",") if part.strip())
+    return values or default
+
+
 def load_settings(env_file: Path | None = None) -> Settings:
     env_values = _read_project_env_file(env_file)
     endpoint = (_get_config_value("CPA_ENDPOINT", env_values) or "").strip().rstrip("/")
@@ -113,4 +133,19 @@ def load_settings(env_file: Path | None = None) -> Settings:
         max_retries=_read_int("CPA_MAX_RETRIES", DEFAULT_MAX_RETRIES, env_values, minimum=0, maximum=5),
         worker_threads=_read_int("CPA_WORKER_THREADS", DEFAULT_WORKER_THREADS, env_values, minimum=1),
         enable_refresh=_read_bool("CPA_ENABLE_REFRESH", DEFAULT_ENABLE_REFRESH, env_values),
+        error_sweep_enabled=_read_bool("CPA_ERROR_SWEEP_ENABLED", DEFAULT_ERROR_SWEEP_ENABLED, env_values),
+        error_sweep_interval_seconds=_read_int(
+            "CPA_ERROR_SWEEP_INTERVAL",
+            DEFAULT_ERROR_SWEEP_INTERVAL_SECONDS,
+            env_values,
+            minimum=1,
+        ),
+        error_disable_types=_read_csv_set("CPA_ERROR_DISABLE_TYPES", DEFAULT_ERROR_DISABLE_TYPES, env_values),
+        error_delete_types=_read_csv_set("CPA_ERROR_DELETE_TYPES", DEFAULT_ERROR_DELETE_TYPES, env_values),
+        error_delete_codes=_read_csv_set("CPA_ERROR_DELETE_CODES", DEFAULT_ERROR_DELETE_CODES, env_values),
+        error_delete_message_keywords=_read_csv_set(
+            "CPA_ERROR_DELETE_MESSAGE_KEYWORDS",
+            DEFAULT_ERROR_DELETE_MESSAGE_KEYWORDS,
+            env_values,
+        ),
     )

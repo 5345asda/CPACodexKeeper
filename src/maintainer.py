@@ -1,3 +1,4 @@
+import json
 import random
 import threading
 import time
@@ -30,6 +31,11 @@ class CPACodexKeeper:
         )
         self.stats = MaintainerStats()
         self._stats_lock = threading.Lock()
+        self._status_mutation_lock = threading.Lock()
+        self._maintenance_lock = threading.Lock()
+        self._error_sweep_lock = threading.Lock()
+        self._error_sweep_stop_event = threading.Event()
+        self._error_sweep_thread = None
 
     def reset_stats(self):
         with self._stats_lock:
@@ -66,16 +72,167 @@ class CPACodexKeeper:
         return self.cpa_client.get_auth_file(name)
 
     def delete_token(self, name, logger=None):
-        if self.dry_run:
-            (logger or self).log("DRY", f"将删除: {name}", indent=1)
-            return True
-        return self.cpa_client.delete_auth_file(name)
+        with self._status_mutation_lock:
+            if self.dry_run:
+                (logger or self).log("DRY", f"将删除: {name}", indent=1)
+                return True
+            return self.cpa_client.delete_auth_file(name)
 
     def set_disabled_status(self, name, disabled=True, logger=None):
-        if self.dry_run:
-            (logger or self).log("DRY", f"将{'禁用' if disabled else '启用'}: {name}", indent=1)
+        with self._status_mutation_lock:
+            if self.dry_run:
+                (logger or self).log("DRY", f"将{'禁用' if disabled else '启用'}: {name}", indent=1)
+                return True
+            return self.cpa_client.set_disabled(name, disabled)
+
+    def get_list_error_type(self, token_info):
+        error = self.get_list_error_info(token_info)
+        error_type = error.get("type")
+        return error_type if isinstance(error_type, str) and error_type else None
+
+    def get_list_error_code(self, token_info):
+        error = self.get_list_error_info(token_info)
+        error_code = error.get("code")
+        return error_code if isinstance(error_code, str) and error_code else None
+
+    def get_list_error_message(self, token_info):
+        error = self.get_list_error_info(token_info)
+        message = error.get("message")
+        return message if isinstance(message, str) else ""
+
+    def get_list_error_info(self, token_info):
+        if token_info.get("status") != "error":
+            return {}
+        status_message = token_info.get("status_message")
+        if isinstance(status_message, str):
+            if not status_message.strip():
+                return {}
+            try:
+                status_message = json.loads(status_message)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return {}
+        if not isinstance(status_message, dict):
+            return {}
+        error = status_message.get("error")
+        if isinstance(error, dict):
+            return error
+        return status_message
+
+    def should_disable_for_list_error(self, token_info):
+        if token_info.get("type") != "codex":
+            return False
+        if token_info.get("disabled") is True:
+            return False
+        error_type = self.get_list_error_type(token_info)
+        return bool(error_type and error_type in self.settings.error_disable_types)
+
+    def should_delete_for_list_error(self, token_info):
+        if token_info.get("type") != "codex":
+            return False
+        error_type = self.get_list_error_type(token_info)
+        if not error_type or error_type not in self.settings.error_delete_types:
+            return False
+        error_code = self.get_list_error_code(token_info)
+        if not error_code or error_code not in self.settings.error_delete_codes:
+            return False
+        keywords = self.settings.error_delete_message_keywords
+        if "*" in keywords:
             return True
-        return self.cpa_client.set_disabled(name, disabled)
+        message = self.get_list_error_message(token_info).lower()
+        return bool(message and any(keyword.lower() in message for keyword in keywords))
+
+    def _empty_error_sweep_result(self, *, skipped_busy=0):
+        return {
+            "scanned": 0,
+            "delete_matched": 0,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": skipped_busy,
+        }
+
+    def sweep_error_status_once(self):
+        if not self._maintenance_lock.acquire(blocking=False):
+            self.log("INFO", "完整巡检运行中，跳过本轮错误状态扫尾")
+            return self._empty_error_sweep_result(skipped_busy=1)
+        try:
+            result = self._empty_error_sweep_result()
+            for token_info in self.cpa_client.list_auth_files():
+                if token_info.get("type") != "codex":
+                    continue
+                result["scanned"] += 1
+                name = token_info.get("name")
+                error_type = self.get_list_error_type(token_info) or "unknown"
+                error_code = self.get_list_error_code(token_info) or "unknown"
+                if self.should_delete_for_list_error(token_info):
+                    result["delete_matched"] += 1
+                    if not name:
+                        result["failed"] += 1
+                        self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}/{error_code}", indent=1)
+                        continue
+                    self.log("WARN", f"错误状态 {error_type}/{error_code}，准备删除: {name}", indent=1)
+                    if self.delete_token(name):
+                        result["deleted"] += 1
+                        self.log("DELETE", f"错误状态已删除: {name}", indent=1)
+                    else:
+                        result["failed"] += 1
+                        self.log("ERROR", f"错误状态删除失败: {name}", indent=1)
+                    continue
+                if not self.should_disable_for_list_error(token_info):
+                    continue
+                result["disable_matched"] += 1
+                if not name:
+                    result["failed"] += 1
+                    self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}", indent=1)
+                    continue
+                self.log("WARN", f"错误状态 {error_type}，准备禁用: {name}", indent=1)
+                if self.set_disabled_status(name, disabled=True):
+                    result["disabled"] += 1
+                    self.log("DISABLE", f"错误状态已禁用: {name}", indent=1)
+                else:
+                    result["failed"] += 1
+                    self.log("ERROR", f"错误状态禁用失败: {name}", indent=1)
+            self.log(
+                "INFO",
+                (
+                    "错误状态扫尾完成: "
+                    f"scanned={result['scanned']} delete_matched={result['delete_matched']} "
+                    f"disable_matched={result['disable_matched']} deleted={result['deleted']} "
+                    f"disabled={result['disabled']} failed={result['failed']} "
+                    f"skipped_busy={result['skipped_busy']}"
+                ),
+            )
+            return result
+        finally:
+            self._maintenance_lock.release()
+
+    def _run_error_sweep_loop(self):
+        interval = self.settings.error_sweep_interval_seconds
+        self.log("INFO", f"错误状态扫尾启动，执行间隔: {interval} 秒")
+        while not self._error_sweep_stop_event.is_set():
+            try:
+                self.sweep_error_status_once()
+            except Exception as exc:
+                self.log("ERROR", f"错误状态扫尾异常: {exc}")
+            if self._error_sweep_stop_event.wait(interval):
+                break
+
+    def start_error_sweep_thread(self):
+        if not self.settings.error_sweep_enabled:
+            self.log("INFO", "错误状态扫尾已关闭")
+            return False
+        with self._error_sweep_lock:
+            if self._error_sweep_thread and self._error_sweep_thread.is_alive():
+                return False
+            self._error_sweep_stop_event.clear()
+            self._error_sweep_thread = threading.Thread(
+                target=self._run_error_sweep_loop,
+                name="cpa-error-status-sweep",
+                daemon=True,
+            )
+            self._error_sweep_thread.start()
+            return True
 
     def check_token_live(self, access_token, account_id=None):
         if not access_token:
@@ -177,6 +334,25 @@ class CPACodexKeeper:
         if detail:
             msg += f" | {detail}"
         return self._skip_token(msg, logger)
+
+    def _apply_list_error_policy(self, name, token_info, logger):
+        if self.should_delete_for_list_error(token_info):
+            error_type = self.get_list_error_type(token_info) or "unknown"
+            error_code = self.get_list_error_code(token_info) or "unknown"
+            return self._delete_token_with_reason(name, f"列表错误状态 {error_type}/{error_code}，准备删除", logger)
+        if not self.should_disable_for_list_error(token_info):
+            return None
+        error_type = self.get_list_error_type(token_info) or "unknown"
+        logger.log("WARN", f"列表错误状态 {error_type}，准备禁用", indent=1)
+        if self.set_disabled_status(name, disabled=True, logger=logger):
+            logger.log("DISABLE", "已禁用", indent=1)
+            self._inc_stat("disabled")
+            logger.blank_line()
+            return "disabled"
+        logger.log("ERROR", "禁用失败", indent=1)
+        self._inc_stat("skipped")
+        logger.blank_line()
+        return "skipped"
 
     def _log_usage_summary(self, body_info, logger):
         plan = body_info.get("plan_type", "unknown")
@@ -320,6 +496,10 @@ class CPACodexKeeper:
         name = token_info.get("name", "unknown")
         logger = TokenLogger(self.logger, idx, total, name)
         try:
+            list_error_result = self._apply_list_error_policy(name, token_info, logger)
+            if list_error_result:
+                return list_error_result
+
             logger.log("INFO", "获取详情...", indent=1)
             token_detail = self.get_token_detail(name)
             if not token_detail:
@@ -388,6 +568,10 @@ class CPACodexKeeper:
         self.logger.divider()
 
     def run(self):
+        with self._maintenance_lock:
+            self._run_locked()
+
+    def _run_locked(self):
         self.reset_stats()
         self.log_startup()
         tokens = self.get_token_list()
@@ -436,6 +620,7 @@ class CPACodexKeeper:
     def run_forever(self, interval_seconds=1800):
         round_no = 0
         self.log("INFO", f"守护模式启动，执行间隔: {interval_seconds} 秒")
+        self.start_error_sweep_thread()
         while True:
             round_no += 1
             self.log("INFO", f"开始第 {round_no} 轮巡检")

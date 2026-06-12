@@ -32,6 +32,268 @@ class MaintainerTests(unittest.TestCase):
         filtered = self.maintainer.filter_tokens(tokens)
         self.assertEqual([token["name"] for token in filtered], ["a", "c"])
 
+    def test_parse_error_type_from_status_message_json(self):
+        token = {
+            "status": "error",
+            "status_message": '{"error":{"type":"usage_limit_reached","code":"rate_limit","message":"The usage limit has been reached"}}',
+        }
+
+        self.assertEqual(self.maintainer.get_list_error_type(token), "usage_limit_reached")
+        self.assertEqual(self.maintainer.get_list_error_code(token), "rate_limit")
+
+    def test_parse_error_type_from_flat_status_message_json(self):
+        token = {
+            "status": "error",
+            "status_message": '{"type":"usage_limit_reached","message":"The usage limit has been reached"}',
+        }
+
+        self.assertEqual(self.maintainer.get_list_error_type(token), "usage_limit_reached")
+
+    def test_parse_error_type_returns_none_for_bad_message(self):
+        token = {"status": "error", "status_message": "not json"}
+
+        self.assertIsNone(self.maintainer.get_list_error_type(token))
+
+    def test_sweep_disables_usage_limit_error_tokens(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-a.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": '{"error":{"type":"usage_limit_reached"}}',
+            },
+            {
+                "name": "codex-b.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "active",
+                "status_message": "",
+            },
+        ])
+        self.maintainer.set_disabled_status = Mock(return_value=True)
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once()
+
+        self.assertEqual(result, {
+            "scanned": 2,
+            "delete_matched": 0,
+            "disable_matched": 1,
+            "deleted": 0,
+            "disabled": 1,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.set_disabled_status.assert_called_once_with("codex-a.json", disabled=True)
+
+    def test_sweep_skips_disabled_or_unconfigured_error_tokens(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-disabled.json",
+                "type": "codex",
+                "disabled": True,
+                "status": "error",
+                "status_message": '{"error":{"type":"usage_limit_reached"}}',
+            },
+            {
+                "name": "codex-auth.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": '{"error":{"type":"authentication_error"}}',
+            },
+            {
+                "name": "xai-error.json",
+                "type": "xai",
+                "disabled": False,
+                "status": "error",
+                "status_message": '{"error":{"type":"usage_limit_reached"}}',
+            },
+        ])
+        self.maintainer.set_disabled_status = Mock(return_value=True)
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once()
+
+        self.assertEqual(result, {
+            "scanned": 2,
+            "delete_matched": 0,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.set_disabled_status.assert_not_called()
+
+    def test_sweep_deletes_auth_unavailable_error_tokens(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-invalidated.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": (
+                    '{"error":{"message":"Your authentication token has been invalidated. '
+                    'Please try signing in again.","type":"authentication_error","code":"auth_unavailable"}}'
+                ),
+            },
+            {
+                "name": "codex-disabled-invalidated.json",
+                "type": "codex",
+                "disabled": True,
+                "status": "error",
+                "status_message": (
+                    '{"error":{"message":"Your authentication token has been invalidated.",'
+                    '"type":"authentication_error","code":"auth_unavailable"}}'
+                ),
+            },
+        ])
+        self.maintainer.delete_token = Mock(return_value=True)
+        self.maintainer.set_disabled_status = Mock(return_value=True)
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once()
+
+        self.assertEqual(result, {
+            "scanned": 2,
+            "delete_matched": 2,
+            "disable_matched": 0,
+            "deleted": 2,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.delete_token.assert_any_call("codex-invalidated.json")
+        self.maintainer.delete_token.assert_any_call("codex-disabled-invalidated.json")
+        self.maintainer.set_disabled_status.assert_not_called()
+
+    def test_sweep_does_not_delete_auth_unavailable_without_invalidated_message(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-pool-unavailable.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": '{"error":{"type":"authentication_error","code":"auth_unavailable","message":"no auth available"}}',
+            },
+            {
+                "name": "codex-wrong-type.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": '{"error":{"type":"rate_limit_error","code":"auth_unavailable","message":"invalidated token"}}',
+            },
+        ])
+        self.maintainer.delete_token = Mock(return_value=True)
+        self.maintainer.set_disabled_status = Mock(return_value=True)
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once()
+
+        self.assertEqual(result, {
+            "scanned": 2,
+            "delete_matched": 0,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.delete_token.assert_not_called()
+        self.maintainer.set_disabled_status.assert_not_called()
+
+    def test_sweep_skips_when_full_maintenance_round_is_running(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(side_effect=AssertionError("should not list while busy"))
+        self.maintainer.log = Mock()
+
+        self.assertTrue(self.maintainer._maintenance_lock.acquire(blocking=False))
+        self.addCleanup(self.maintainer._maintenance_lock.release)
+
+        result = self.maintainer.sweep_error_status_once()
+
+        self.assertEqual(result, {
+            "scanned": 0,
+            "delete_matched": 0,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 1,
+        })
+
+    def test_process_token_disables_list_usage_error_without_detail_download(self):
+        self.maintainer.get_token_detail = Mock(side_effect=AssertionError("should not download detail"))
+        self.maintainer.check_token_live = Mock(side_effect=AssertionError("should not check usage"))
+        self.maintainer.set_disabled_status = Mock(return_value=True)
+
+        result = self.maintainer.process_token({
+            "name": "codex-error.json",
+            "type": "codex",
+            "disabled": False,
+            "status": "error",
+            "status_message": '{"error":{"type":"usage_limit_reached"}}',
+        }, 1, 1)
+
+        self.assertEqual(result, "disabled")
+        self.maintainer.set_disabled_status.assert_called_once_with("codex-error.json", disabled=True, logger=ANY)
+        self.assertEqual(self.maintainer.stats.disabled, 1)
+
+    def test_process_token_deletes_list_auth_unavailable_without_detail_download(self):
+        self.maintainer.get_token_detail = Mock(side_effect=AssertionError("should not download detail"))
+        self.maintainer.check_token_live = Mock(side_effect=AssertionError("should not check usage"))
+        self.maintainer.delete_token = Mock(return_value=True)
+        self.maintainer.set_disabled_status = Mock(return_value=True)
+
+        result = self.maintainer.process_token({
+            "name": "codex-invalidated.json",
+            "type": "codex",
+            "disabled": False,
+            "status": "error",
+            "status_message": (
+                '{"error":{"message":"Your authentication token has been invalidated. '
+                'Please try signing in again.","type":"authentication_error","code":"auth_unavailable"}}'
+            ),
+        }, 1, 1)
+
+        self.assertEqual(result, "dead")
+        self.maintainer.delete_token.assert_called_once_with("codex-invalidated.json", logger=ANY)
+        self.maintainer.set_disabled_status.assert_not_called()
+        self.assertEqual(self.maintainer.stats.dead, 1)
+
+    def test_process_token_does_not_delete_auth_unavailable_without_invalidated_message(self):
+        self.maintainer.get_token_detail = Mock(return_value={
+            "email": "a@example.com",
+            "disabled": False,
+            "access_token": "token",
+            "refresh_token": "rt",
+            "account_id": "acc",
+            "expired": "2099-01-01T00:00:00Z",
+        })
+        self.maintainer.check_token_live = Mock(return_value=(200, {
+            "json": {
+                "plan_type": "free",
+                "rate_limit": {
+                    "primary_window": {"used_percent": 0, "limit_window_seconds": 604800},
+                    "secondary_window": None,
+                },
+                "credits": {"has_credits": False},
+            }
+        }))
+        self.maintainer.delete_token = Mock(return_value=True)
+
+        result = self.maintainer.process_token({
+            "name": "codex-pool-unavailable.json",
+            "type": "codex",
+            "disabled": False,
+            "status": "error",
+            "status_message": '{"error":{"type":"authentication_error","code":"auth_unavailable","message":"no auth available"}}',
+        }, 1, 1)
+
+        self.assertEqual(result, "alive")
+        self.maintainer.delete_token.assert_not_called()
+
     def test_parse_usage_info_reads_team_primary_and_secondary_windows(self):
         usage = parse_usage_info({
             "plan_type": "team",
@@ -620,3 +882,12 @@ class MaintainerTests(unittest.TestCase):
         self.maintainer.run()
 
         self.maintainer.log.assert_any_call("INFO", "线程数: 5")
+
+    def test_run_forever_starts_error_sweep_thread_before_full_loop(self):
+        self.maintainer.start_error_sweep_thread = Mock()
+        self.maintainer.run = Mock(side_effect=KeyboardInterrupt)
+
+        with self.assertRaises(KeyboardInterrupt):
+            self.maintainer.run_forever(interval_seconds=1)
+
+        self.maintainer.start_error_sweep_thread.assert_called_once()

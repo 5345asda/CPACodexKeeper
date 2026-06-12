@@ -59,18 +59,22 @@ CPACodexKeeper 会把这些维护动作自动化，减少人工巡检和手工�
 
 1. 从 CPA 管理 API 拉取 token 列表
 2. 只保留 `type=codex` 的 token
-3. 逐个获取 token 详情
-4. 读取 token 过期时间和剩余有效期
-5. 调用 OpenAI usage 接口检查可用性和限额
-6. 如果 usage 返回 `401` 或 `402`，则判定 token 无效或 workspace 已停用，并删除
-7. 如果 usage 返回中包含两个 quota 窗口，则按窗口实际含义判断
-8. 只要任一窗口达到阈值，就会禁用；只有两个窗口都低于阈值时才会重新启用
-9. 如果 token **没有 `refresh_token`**，并且已经过期，则直接删除
-10. 如果 token **没有 `refresh_token`**，并且检测额度已达到阈值，则直接删除
-11. 如果显式启用了自动刷新，并且 token 在当前轮处理后仍是禁用状态且临近过期，则尝试刷新
-12. 刷新成功后将最新 token 数据上传回 CPA
+3. 如果列表元数据显示 `status=error` 且错误 type、code、message 同时命中自动删除规则，则先删除并跳过详情下载
+4. 如果列表元数据显示 `status=error` 且错误类型命中自动禁用规则，则先禁用并跳过详情下载
+5. 逐个获取 token 详情
+6. 读取 token 过期时间和剩余有效期
+7. 调用 OpenAI usage 接口检查可用性和限额
+8. 如果 usage 返回 `401` 或 `402`，则判定 token 无效或 workspace 已停用，并删除
+9. 如果 usage 返回中包含两个 quota 窗口，则按窗口实际含义判断
+10. 只要任一窗口达到阈值，就会禁用；只有两个窗口都低于阈值时才会重新启用
+11. 如果 token **没有 `refresh_token`**，并且已经过期，则直接删除
+12. 如果 token **没有 `refresh_token`**，并且检测额度已达到阈值，则直接删除
+13. 如果显式启用了自动刷新，并且 token 在当前轮处理后仍是禁用状态且临近过期，则尝试刷新
+14. 刷新成功后将最新 token 数据上传回 CPA
 
 这是一个**按轮次运行、轮内可并发**的流程：一轮结束后才会进入下一轮，但同一轮中的多个 token 可以并发巡检。
+
+守护模式还会启动一个轻量错误扫尾任务。它默认每 60 秒只读取 CPA 列表元数据，不下载 token 详情、不调用 OpenAI usage、不刷新、也不重新启用。默认只删除同时满足 `type=authentication_error`、`code=auth_unavailable` 且 message 包含 `invalidated` 的认证失效错误，并把 `type=usage_limit_reached` 这类额度错误设置为禁用。这样可以快速处理前端红框错误，同时避免和完整巡检的启用、删除、刷新逻辑冲突。
 
 ---
 
@@ -138,6 +142,12 @@ cp .env.example .env
 - `CPA_QUOTA_THRESHOLD`：禁用阈值，默认 `100`
 - `CPA_EXPIRY_THRESHOLD_DAYS`：禁用 token 的刷新阈值天数，默认 `3`
 - `CPA_ENABLE_REFRESH`：是否启用对禁用 token 的自动刷新，默认 `true`
+- `CPA_ERROR_SWEEP_ENABLED`：是否启用守护模式轻量错误扫尾，默认 `true`
+- `CPA_ERROR_SWEEP_INTERVAL`：错误扫尾间隔秒数，默认 `60`
+- `CPA_ERROR_DISABLE_TYPES`：触发自动禁用的列表级错误类型，逗号分隔，默认 `usage_limit_reached`
+- `CPA_ERROR_DELETE_TYPES`：触发自动删除的列表级错误类型，逗号分隔，默认 `authentication_error`
+- `CPA_ERROR_DELETE_CODES`：触发自动删除的列表级错误 code，逗号分隔，默认 `auth_unavailable`
+- `CPA_ERROR_DELETE_MESSAGE_KEYWORDS`：触发自动删除的错误 message 关键词，逗号分隔，默认 `invalidated`
 - `CPA_HTTP_TIMEOUT`：CPA API 请求超时秒数，默认 `30`
 - `CPA_USAGE_TIMEOUT`：OpenAI usage 请求超时秒数，默认 `15`
 - `CPA_MAX_RETRIES`：临时网络 / 5xx 错误重试次数，默认 `2`
@@ -146,6 +156,8 @@ cp .env.example .env
 推荐直接参考 `.env.example` 中的中英双语注释填写。
 
 默认开启自动刷新，但 keeper 仍只会刷新当前轮处理后仍处于禁用状态的 token；启用状态 token 交给 CPA 自己的自动刷新逻辑处理。如果你需要避免与其他刷新写入方竞争，可以在 `.env` 里显式设成 `false`。
+
+默认开启错误扫尾。扫尾任务会先处理删除规则，再处理禁用规则；不会启用或刷新。删除规则默认要求错误 type、code、message 关键词同时命中，避免把临时 auth-pool 不可用误删。错误扫尾和完整巡检通过同一个维护互斥锁串行运行；删除和状态修改也会通过同一个写入互斥入口串行执行。
 
 ---
 
