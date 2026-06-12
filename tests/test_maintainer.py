@@ -204,8 +204,17 @@ class MaintainerTests(unittest.TestCase):
         self.maintainer.delete_token.assert_not_called()
         self.maintainer.set_disabled_status.assert_not_called()
 
-    def test_sweep_skips_when_full_maintenance_round_is_running(self):
-        self.maintainer.cpa_client.list_auth_files = Mock(side_effect=AssertionError("should not list while busy"))
+    def test_sweep_runs_while_full_maintenance_round_is_running(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-a.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": '{"error":{"type":"usage_limit_reached"}}',
+            },
+        ])
+        self.maintainer.set_disabled_status = Mock(return_value=True)
         self.maintainer.log = Mock()
 
         self.assertTrue(self.maintainer._maintenance_lock.acquire(blocking=False))
@@ -214,14 +223,59 @@ class MaintainerTests(unittest.TestCase):
         result = self.maintainer.sweep_error_status_once()
 
         self.assertEqual(result, {
-            "scanned": 0,
+            "scanned": 1,
             "delete_matched": 0,
-            "disable_matched": 0,
+            "disable_matched": 1,
+            "deleted": 0,
+            "disabled": 1,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.set_disabled_status.assert_called_once_with("codex-a.json", disabled=True)
+
+    def test_sweep_skips_reserved_token_without_mutating(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-busy.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": '{"error":{"type":"usage_limit_reached"}}',
+            },
+        ])
+        self.assertTrue(self.maintainer._reserve_token_name("codex-busy.json"))
+        self.addCleanup(self.maintainer._release_token_name, "codex-busy.json")
+        self.maintainer.set_disabled_status = Mock(return_value=True)
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once()
+
+        self.assertEqual(result, {
+            "scanned": 1,
+            "delete_matched": 0,
+            "disable_matched": 1,
             "deleted": 0,
             "disabled": 0,
             "failed": 0,
             "skipped_busy": 1,
         })
+        self.maintainer.set_disabled_status.assert_not_called()
+
+    def test_process_token_skips_token_mutated_by_sweep(self):
+        self.maintainer._mark_sweep_mutated("codex-swept.json")
+        self.maintainer.get_token_detail = Mock(side_effect=AssertionError("should not download detail"))
+        self.maintainer.check_token_live = Mock(side_effect=AssertionError("should not check usage"))
+
+        result = self.maintainer.process_token({
+            "name": "codex-swept.json",
+            "type": "codex",
+            "disabled": False,
+            "status": "active",
+            "status_message": "",
+        }, 1, 1)
+
+        self.assertEqual(result, "skipped")
+        self.assertEqual(self.maintainer.stats.skipped, 1)
 
     def test_process_token_disables_list_usage_error_without_detail_download(self):
         self.maintainer.get_token_detail = Mock(side_effect=AssertionError("should not download detail"))

@@ -156,7 +156,7 @@ The `.env.example` file already includes bilingual comments for direct editing.
 
 Automatic refresh is enabled by default, but the keeper still refreshes only tokens that remain disabled after quota handling; enabled tokens are left to CPA's own auto-refresh logic. If you need to avoid competing with another writer rotating the same shared `refresh_token`, set it to `false` in `.env`.
 
-The error sweep is enabled by default. It applies delete rules before disable rules, and never enables or refreshes tokens. The default delete rule requires error type, code, and message keyword matches so transient auth-pool unavailability is not deleted. The error sweep and the full maintenance round share one maintenance lock; delete and status writes also go through the same serialized mutation path.
+The error sweep is enabled by default. It applies delete rules before disable rules, and never enables or refreshes tokens. The default delete rule requires error type, code, and message keyword matches so transient auth-pool unavailability is not deleted. The error sweep and the full maintenance round may run at the same time, but each token name is reserved before mutation so the two tasks do not write the same auth file concurrently; delete and status writes also go through the same serialized mutation path.
 
 ---
 

@@ -33,6 +33,9 @@ class CPACodexKeeper:
         self._stats_lock = threading.Lock()
         self._status_mutation_lock = threading.Lock()
         self._maintenance_lock = threading.Lock()
+        self._token_reservation_lock = threading.Lock()
+        self._reserved_token_names = set()
+        self._sweep_mutated_names = set()
         self._error_sweep_lock = threading.Lock()
         self._error_sweep_stop_event = threading.Event()
         self._error_sweep_thread = None
@@ -84,6 +87,37 @@ class CPACodexKeeper:
                 (logger or self).log("DRY", f"将{'禁用' if disabled else '启用'}: {name}", indent=1)
                 return True
             return self.cpa_client.set_disabled(name, disabled)
+
+    def _reserve_token_name(self, name):
+        if not name:
+            return True
+        with self._token_reservation_lock:
+            if name in self._reserved_token_names:
+                return False
+            self._reserved_token_names.add(name)
+            return True
+
+    def _release_token_name(self, name):
+        if not name:
+            return
+        with self._token_reservation_lock:
+            self._reserved_token_names.discard(name)
+
+    def _mark_sweep_mutated(self, name):
+        if not name:
+            return
+        with self._token_reservation_lock:
+            self._sweep_mutated_names.add(name)
+
+    def _was_sweep_mutated(self, name):
+        if not name:
+            return False
+        with self._token_reservation_lock:
+            return name in self._sweep_mutated_names
+
+    def _clear_sweep_mutation_marks(self):
+        with self._token_reservation_lock:
+            self._sweep_mutated_names.clear()
 
     def get_list_error_type(self, token_info):
         error = self.get_list_error_info(token_info)
@@ -152,60 +186,73 @@ class CPACodexKeeper:
             "skipped_busy": skipped_busy,
         }
 
+    def _reserve_error_sweep_target(self, name, result, error_label):
+        if not self._reserve_token_name(name):
+            result["skipped_busy"] += 1
+            self.log("INFO", f"同名 Token 正在完整巡检中，跳过本轮错误状态扫尾: {name} ({error_label})", indent=1)
+            return False
+        return True
+
     def sweep_error_status_once(self):
-        if not self._maintenance_lock.acquire(blocking=False):
-            self.log("INFO", "完整巡检运行中，跳过本轮错误状态扫尾")
-            return self._empty_error_sweep_result(skipped_busy=1)
-        try:
-            result = self._empty_error_sweep_result()
-            for token_info in self.cpa_client.list_auth_files():
-                if token_info.get("type") != "codex":
+        result = self._empty_error_sweep_result()
+        for token_info in self.cpa_client.list_auth_files():
+            if token_info.get("type") != "codex":
+                continue
+            result["scanned"] += 1
+            name = token_info.get("name")
+            error_type = self.get_list_error_type(token_info) or "unknown"
+            error_code = self.get_list_error_code(token_info) or "unknown"
+            if self.should_delete_for_list_error(token_info):
+                result["delete_matched"] += 1
+                if not name:
+                    result["failed"] += 1
+                    self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}/{error_code}", indent=1)
                     continue
-                result["scanned"] += 1
-                name = token_info.get("name")
-                error_type = self.get_list_error_type(token_info) or "unknown"
-                error_code = self.get_list_error_code(token_info) or "unknown"
-                if self.should_delete_for_list_error(token_info):
-                    result["delete_matched"] += 1
-                    if not name:
-                        result["failed"] += 1
-                        self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}/{error_code}", indent=1)
-                        continue
+                if not self._reserve_error_sweep_target(name, result, f"{error_type}/{error_code}"):
+                    continue
+                try:
                     self.log("WARN", f"错误状态 {error_type}/{error_code}，准备删除: {name}", indent=1)
                     if self.delete_token(name):
                         result["deleted"] += 1
+                        self._mark_sweep_mutated(name)
                         self.log("DELETE", f"错误状态已删除: {name}", indent=1)
                     else:
                         result["failed"] += 1
                         self.log("ERROR", f"错误状态删除失败: {name}", indent=1)
-                    continue
-                if not self.should_disable_for_list_error(token_info):
-                    continue
-                result["disable_matched"] += 1
-                if not name:
-                    result["failed"] += 1
-                    self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}", indent=1)
-                    continue
+                finally:
+                    self._release_token_name(name)
+                continue
+            if not self.should_disable_for_list_error(token_info):
+                continue
+            result["disable_matched"] += 1
+            if not name:
+                result["failed"] += 1
+                self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}", indent=1)
+                continue
+            if not self._reserve_error_sweep_target(name, result, error_type):
+                continue
+            try:
                 self.log("WARN", f"错误状态 {error_type}，准备禁用: {name}", indent=1)
                 if self.set_disabled_status(name, disabled=True):
                     result["disabled"] += 1
+                    self._mark_sweep_mutated(name)
                     self.log("DISABLE", f"错误状态已禁用: {name}", indent=1)
                 else:
                     result["failed"] += 1
                     self.log("ERROR", f"错误状态禁用失败: {name}", indent=1)
-            self.log(
-                "INFO",
-                (
-                    "错误状态扫尾完成: "
-                    f"scanned={result['scanned']} delete_matched={result['delete_matched']} "
-                    f"disable_matched={result['disable_matched']} deleted={result['deleted']} "
-                    f"disabled={result['disabled']} failed={result['failed']} "
-                    f"skipped_busy={result['skipped_busy']}"
-                ),
-            )
-            return result
-        finally:
-            self._maintenance_lock.release()
+            finally:
+                self._release_token_name(name)
+        self.log(
+            "INFO",
+            (
+                "错误状态扫尾完成: "
+                f"scanned={result['scanned']} delete_matched={result['delete_matched']} "
+                f"disable_matched={result['disable_matched']} deleted={result['deleted']} "
+                f"disabled={result['disabled']} failed={result['failed']} "
+                f"skipped_busy={result['skipped_busy']}"
+            ),
+        )
+        return result
 
     def _run_error_sweep_loop(self):
         interval = self.settings.error_sweep_interval_seconds
@@ -495,7 +542,16 @@ class CPACodexKeeper:
     def process_token(self, token_info, idx, total):
         name = token_info.get("name", "unknown")
         logger = TokenLogger(self.logger, idx, total, name)
+        reserved = False
         try:
+            if self._was_sweep_mutated(name):
+                return self._skip_token("本轮已由错误状态扫尾处理，跳过避免重复写入", logger)
+            if not self._reserve_token_name(name):
+                return self._skip_token("同名 Token 正在错误状态扫尾中，跳过避免冲突", logger)
+            reserved = True
+            if self._was_sweep_mutated(name):
+                return self._skip_token("本轮已由错误状态扫尾处理，跳过避免重复写入", logger)
+
             list_error_result = self._apply_list_error_policy(name, token_info, logger)
             if list_error_result:
                 return list_error_result
@@ -554,6 +610,8 @@ class CPACodexKeeper:
             logger.blank_line()
             return "alive"
         finally:
+            if reserved:
+                self._release_token_name(name)
             logger.flush()
 
     def log_startup(self):
@@ -572,6 +630,7 @@ class CPACodexKeeper:
             self._run_locked()
 
     def _run_locked(self):
+        self._clear_sweep_mutation_marks()
         self.reset_stats()
         self.log_startup()
         tokens = self.get_token_list()
