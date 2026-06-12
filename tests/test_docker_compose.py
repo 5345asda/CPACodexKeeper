@@ -18,3 +18,10 @@ class DockerComposeTests(unittest.TestCase):
         self.assertIn("CPA_ERROR_DELETE_TYPES: ${CPA_ERROR_DELETE_TYPES:-authentication_error}", compose_text)
         self.assertIn("CPA_ERROR_DELETE_CODES: ${CPA_ERROR_DELETE_CODES:-auth_unavailable}", compose_text)
         self.assertIn("CPA_ERROR_DELETE_MESSAGE_KEYWORDS: ${CPA_ERROR_DELETE_MESSAGE_KEYWORDS:-invalidated}", compose_text)
+
+    def test_compose_preserves_live_network_topology(self):
+        compose_text = pathlib.Path("docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn('host.docker.internal:host-gateway', compose_text)
+        self.assertIn("networks:", compose_text)
+        self.assertIn("shared:", compose_text)
+        self.assertIn("external: true", compose_text)
