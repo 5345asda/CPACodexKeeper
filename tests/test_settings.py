@@ -20,8 +20,11 @@ class SettingsTests(unittest.TestCase):
         return env_path
 
     def test_load_settings_reads_required_values(self):
-        with patch.dict(os.environ, {"CPA_ENDPOINT": "https://example.com", "CPA_TOKEN": "secret"}, clear=True):
-            settings = load_settings()
+        project_env_file = self._make_env_file("CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true\n")
+        isolated_env_file = project_env_file.with_name("isolated.env")
+        with patch("src.settings.PROJECT_ENV_FILE", project_env_file):
+            with patch.dict(os.environ, {"CPA_ENDPOINT": "https://example.com", "CPA_TOKEN": "secret"}, clear=True):
+                settings = load_settings(env_file=isolated_env_file)
         self.assertEqual(settings.cpa_endpoint, "https://example.com")
         self.assertEqual(settings.cpa_token, "secret")
         self.assertEqual(settings.interval_seconds, 1800)
@@ -36,16 +39,15 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.error_delete_message_keywords, frozenset({"invalidated"}))
 
     def test_load_settings_reads_xai_permission_denied_delete_enabled(self):
+        env_file = self._make_env_file("CPA_ENDPOINT=https://example.com\nCPA_TOKEN=secret\n")
         with patch.dict(
             os.environ,
             {
-                "CPA_ENDPOINT": "https://example.com",
-                "CPA_TOKEN": "secret",
                 "CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED": "true",
             },
             clear=True,
         ):
-            settings = load_settings()
+            settings = load_settings(env_file=env_file)
 
         self.assertTrue(settings.xai_permission_denied_delete_enabled)
 
