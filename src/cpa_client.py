@@ -70,7 +70,14 @@ class CPAClient:
         files = response_data["files"]
         if not isinstance(files, list):
             return [], "invalid_files"
-        if not all(isinstance(file_info, dict) for file_info in files):
+        if not all(
+            isinstance(file_info, dict)
+            and isinstance(file_info.get("name"), str)
+            and bool(file_info["name"].strip())
+            and isinstance(file_info.get("type"), str)
+            and bool(file_info["type"].strip())
+            for file_info in files
+        ):
             return [], "invalid_file_entry"
         return files, None
 

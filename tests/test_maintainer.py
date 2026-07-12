@@ -8,6 +8,7 @@ from unittest.mock import ANY, Mock, patch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from src.maintainer import CPACodexKeeper
+from src.models import RequestResult
 from src.openai_client import parse_usage_info
 from src.settings import Settings
 
@@ -412,6 +413,59 @@ class MaintainerTests(unittest.TestCase):
                 ]
                 self.assertTrue(any(error_category in message for message in log_messages))
                 self.assertFalse(any("legacy list method" in message for message in log_messages))
+
+    def test_sweep_rejects_mixed_malformed_dict_response_before_partial_xai_delete(self):
+        self.settings.xai_permission_denied_delete_enabled = True
+        self.maintainer.dry_run = False
+        del self.maintainer.cpa_client.list_auth_files_with_error
+        self.maintainer.cpa_client.list_auth_files = Mock(
+            side_effect=AssertionError("legacy list method must not be used by the metadata sweep")
+        )
+        self.maintainer.cpa_client._request = Mock(return_value=RequestResult(
+            status_code=200,
+            json_data={
+                "files": [
+                    {
+                        "name": "xai-permission-denied.json",
+                        "type": "xai",
+                        "disabled": False,
+                        "status": "error",
+                        "status_message": (
+                            '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+                            'Please ensure you are using the correct credentials."}'
+                        ),
+                    },
+                    {},
+                ],
+            },
+        ))
+        self.maintainer.cpa_client.delete_auth_file = Mock(return_value=True)
+        self.maintainer.set_disabled_status = Mock()
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once(allowed_types={"xai"})
+
+        self.assertEqual(result, {
+            "scanned": 0,
+            "delete_matched": 0,
+            "would_delete": 0,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 1,
+            "skipped_busy": 0,
+        })
+        self.maintainer.cpa_client._request.assert_called_once_with("GET", "/v0/management/auth-files")
+        self.maintainer.cpa_client.list_auth_files.assert_not_called()
+        self.maintainer.cpa_client.delete_auth_file.assert_not_called()
+        self.maintainer.set_disabled_status.assert_not_called()
+        self.assertFalse(self.maintainer._was_sweep_mutated("xai-permission-denied.json"))
+        log_messages = [
+            call.args[1]
+            for call in self.maintainer.log.call_args_list
+            if len(call.args) > 1
+        ]
+        self.assertTrue(any("invalid_file_entry" in message for message in log_messages))
 
     def test_sweep_xai_scope_deletes_only_disabled_exact_xai_candidate(self):
         self.settings.xai_permission_denied_delete_enabled = True

@@ -12,7 +12,7 @@ from src.models import RequestResult
 class CPAClientTests(unittest.TestCase):
     def test_list_auth_files_with_error_returns_files_for_valid_response(self):
         client = CPAClient("https://example.com", "secret")
-        expected_files = [{"name": "xai-permission-denied.json"}]
+        expected_files = [{"name": "xai-permission-denied.json", "type": "xai"}]
         client._request = Mock(
             return_value=RequestResult(status_code=200, json_data={"files": expected_files})
         )
@@ -52,8 +52,31 @@ class CPAClientTests(unittest.TestCase):
                 "non-dict file entry",
                 RequestResult(
                     status_code=200,
-                    json_data={"files": [{"name": "valid-xai.json"}, None]},
+                    json_data={"files": [{"name": "valid-xai.json", "type": "xai"}, None]},
                 ),
+                "invalid_file_entry",
+            ),
+            (
+                "empty dictionary file entry",
+                RequestResult(
+                    status_code=200,
+                    json_data={"files": [{"name": "valid-xai.json", "type": "xai"}, {}]},
+                ),
+                "invalid_file_entry",
+            ),
+            (
+                "non-string name",
+                RequestResult(status_code=200, json_data={"files": [{"name": 1, "type": "xai"}]}),
+                "invalid_file_entry",
+            ),
+            (
+                "missing type",
+                RequestResult(status_code=200, json_data={"files": [{"name": "valid-xai.json"}]}),
+                "invalid_file_entry",
+            ),
+            (
+                "empty type",
+                RequestResult(status_code=200, json_data={"files": [{"name": "valid-xai.json", "type": ""}]}),
                 "invalid_file_entry",
             ),
         )
@@ -81,15 +104,24 @@ class CPAClientTests(unittest.TestCase):
 
     def test_list_auth_files_returns_empty_for_invalid_file_entries(self):
         client = CPAClient("https://example.com", "secret")
-        client._request = Mock(return_value=RequestResult(
-            status_code=200,
-            json_data={"files": [{"name": "valid-xai.json"}, None]},
-        ))
+        invalid_files_cases = (
+            ("mixed valid and empty dictionary", [{"name": "valid-xai.json", "type": "xai"}, {}]),
+            ("non-string name", [{"name": 1, "type": "xai"}]),
+            ("missing type", [{"name": "valid-xai.json"}]),
+            ("empty type", [{"name": "valid-xai.json", "type": ""}]),
+        )
 
-        files = client.list_auth_files()
+        for label, invalid_files in invalid_files_cases:
+            with self.subTest(label=label):
+                client._request = Mock(return_value=RequestResult(
+                    status_code=200,
+                    json_data={"files": invalid_files},
+                ))
 
-        self.assertEqual(files, [])
-        client._request.assert_called_once_with("GET", "/v0/management/auth-files")
+                files = client.list_auth_files()
+
+                self.assertEqual(files, [])
+                client._request.assert_called_once_with("GET", "/v0/management/auth-files")
 
     def test_upload_auth_file_passes_name_via_params(self):
         client = CPAClient("https://example.com", "secret")
