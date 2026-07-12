@@ -48,6 +48,14 @@ class CPAClientTests(unittest.TestCase):
                 RequestResult(status_code=200, json_data={"files": {}}),
                 "invalid_files",
             ),
+            (
+                "non-dict file entry",
+                RequestResult(
+                    status_code=200,
+                    json_data={"files": [{"name": "valid-xai.json"}, None]},
+                ),
+                "invalid_file_entry",
+            ),
         )
 
         for label, response, expected_error in cases:
@@ -70,6 +78,18 @@ class CPAClientTests(unittest.TestCase):
 
         self.assertEqual(files, [])
         client.list_auth_files_with_error.assert_called_once_with()
+
+    def test_list_auth_files_returns_empty_for_invalid_file_entries(self):
+        client = CPAClient("https://example.com", "secret")
+        client._request = Mock(return_value=RequestResult(
+            status_code=200,
+            json_data={"files": [{"name": "valid-xai.json"}, None]},
+        ))
+
+        files = client.list_auth_files()
+
+        self.assertEqual(files, [])
+        client._request.assert_called_once_with("GET", "/v0/management/auth-files")
 
     def test_upload_auth_file_passes_name_via_params(self):
         client = CPAClient("https://example.com", "secret")

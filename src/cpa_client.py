@@ -70,6 +70,8 @@ class CPAClient:
         files = response_data["files"]
         if not isinstance(files, list):
             return [], "invalid_files"
+        if not all(isinstance(file_info, dict) for file_info in files):
+            return [], "invalid_file_entry"
         return files, None
 
     def list_auth_files(self) -> list[dict[str, Any]]:
