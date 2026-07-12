@@ -76,6 +76,24 @@ class MaintainerTests(unittest.TestCase):
 
         self.assertEqual(self.maintainer.get_list_error_message(token), "Nested error message")
 
+    def test_nested_codex_error_scalar_does_not_trigger_legacy_delete(self):
+        token = {
+            "type": "codex",
+            "status": "error",
+            "status_message": (
+                '{"error":{"type":"authentication_error","code":"auth_unavailable",'
+                '"error":"Your authentication token has been invalidated."}}'
+            ),
+        }
+
+        self.assertEqual(
+            (
+                self.maintainer.get_list_error_message(token),
+                self.maintainer.should_delete_for_list_error(token),
+            ),
+            ("", False),
+        )
+
     def test_should_delete_xai_chat_permission_denied_when_enabled(self):
         self.settings.xai_permission_denied_delete_enabled = True
         token = {

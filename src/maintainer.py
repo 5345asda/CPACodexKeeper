@@ -130,14 +130,24 @@ class CPACodexKeeper:
         return error_code if isinstance(error_code, str) and error_code else None
 
     def get_list_error_message(self, token_info):
-        error = self.get_list_error_info(token_info)
-        message = error.get("message")
+        status_message = self._get_list_status_message(token_info)
+        error = status_message.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            return message if isinstance(message, str) else ""
+        message = status_message.get("message")
         if isinstance(message, str):
             return message
-        flat_error = error.get("error")
-        return flat_error if isinstance(flat_error, str) else ""
+        return error if isinstance(error, str) else ""
 
     def get_list_error_info(self, token_info):
+        status_message = self._get_list_status_message(token_info)
+        error = status_message.get("error")
+        if isinstance(error, dict):
+            return error
+        return status_message
+
+    def _get_list_status_message(self, token_info):
         if token_info.get("status") != "error":
             return {}
         status_message = token_info.get("status_message")
@@ -150,9 +160,6 @@ class CPACodexKeeper:
                 return {}
         if not isinstance(status_message, dict):
             return {}
-        error = status_message.get("error")
-        if isinstance(error, dict):
-            return error
         return status_message
 
     def should_disable_for_list_error(self, token_info):
