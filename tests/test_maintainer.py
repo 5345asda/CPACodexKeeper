@@ -54,6 +54,104 @@ class MaintainerTests(unittest.TestCase):
 
         self.assertIsNone(self.maintainer.get_list_error_type(token))
 
+    def test_get_list_error_message_returns_flat_xai_error_string(self):
+        token = {
+            "status": "error",
+            "status_message": (
+                '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+                'Please ensure you are using the correct credentials."}'
+            ),
+        }
+
+        self.assertEqual(
+            self.maintainer.get_list_error_message(token),
+            "Access to the chat endpoint is denied. Please ensure you are using the correct credentials.",
+        )
+
+    def test_get_list_error_message_keeps_nested_error_message(self):
+        token = {
+            "status": "error",
+            "status_message": '{"error":{"message":"Nested error message","code":"auth_unavailable"}}',
+        }
+
+        self.assertEqual(self.maintainer.get_list_error_message(token), "Nested error message")
+
+    def test_should_delete_xai_chat_permission_denied_when_enabled(self):
+        self.settings.xai_permission_denied_delete_enabled = True
+        token = {
+            "type": "xai",
+            "status": "error",
+            "status_message": (
+                '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+                'Please ensure you are using the correct credentials."}'
+            ),
+        }
+
+        self.assertTrue(self.maintainer.should_delete_for_list_error(token))
+
+    def test_should_not_delete_xai_chat_permission_denied_when_conditions_are_incomplete(self):
+        matching_status_message = (
+            '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+            'Please ensure you are using the correct credentials."}'
+        )
+        matching_token = {
+            "type": "xai",
+            "status": "error",
+            "status_message": matching_status_message,
+        }
+        cases = (
+            ("feature disabled", False, matching_token),
+            ("non-xai type", True, {**matching_token, "type": "vertex"}),
+            (
+                "wrong code",
+                True,
+                {
+                    **matching_token,
+                    "status_message": matching_status_message.replace(
+                        "permission-denied", "permission-denied-other"
+                    ),
+                },
+            ),
+            (
+                "missing chat endpoint phrase",
+                True,
+                {
+                    **matching_token,
+                    "status_message": '{"code":"permission-denied","error":"Access is denied."}',
+                },
+            ),
+            ("active status", True, {**matching_token, "status": "active"}),
+            ("malformed status message", True, {**matching_token, "status_message": "not json"}),
+            (
+                "non-string flat error",
+                True,
+                {
+                    **matching_token,
+                    "status_message": (
+                        '{"code":"permission-denied","error":["Access to the chat endpoint is denied."]}'
+                    ),
+                },
+            ),
+        )
+
+        for label, enabled, token in cases:
+            with self.subTest(label=label):
+                self.settings.xai_permission_denied_delete_enabled = enabled
+
+                self.assertFalse(self.maintainer.should_delete_for_list_error(token))
+
+    def test_should_delete_for_list_error_keeps_legacy_codex_invalidated_matching(self):
+        token = {
+            "type": "codex",
+            "status": "error",
+            "status_message": (
+                '{"error":{"message":"Your authentication token has been invalidated.",'
+                '"type":"authentication_error","code":"auth_unavailable"}}'
+            ),
+        }
+
+        self.assertTrue(self.maintainer.should_delete_for_list_error(token))
+
     def test_sweep_disables_usage_limit_error_tokens(self):
         self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
             {

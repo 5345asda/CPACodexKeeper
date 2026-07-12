@@ -132,7 +132,10 @@ class CPACodexKeeper:
     def get_list_error_message(self, token_info):
         error = self.get_list_error_info(token_info)
         message = error.get("message")
-        return message if isinstance(message, str) else ""
+        if isinstance(message, str):
+            return message
+        flat_error = error.get("error")
+        return flat_error if isinstance(flat_error, str) else ""
 
     def get_list_error_info(self, token_info):
         if token_info.get("status") != "error":
@@ -160,7 +163,20 @@ class CPACodexKeeper:
         error_type = self.get_list_error_type(token_info)
         return bool(error_type and error_type in self.settings.error_disable_types)
 
+    def should_delete_for_xai_permission_denied(self, token_info):
+        if token_info.get("type") != "xai":
+            return False
+        if token_info.get("status") != "error":
+            return False
+        if not self.settings.xai_permission_denied_delete_enabled:
+            return False
+        if self.get_list_error_code(token_info) != "permission-denied":
+            return False
+        return "access to the chat endpoint is denied" in self.get_list_error_message(token_info).lower()
+
     def should_delete_for_list_error(self, token_info):
+        if self.should_delete_for_xai_permission_denied(token_info):
+            return True
         if token_info.get("type") != "codex":
             return False
         error_type = self.get_list_error_type(token_info)
