@@ -21,6 +21,9 @@ class MaintainerTests(unittest.TestCase):
             expiry_threshold_days=3,
         )
         self.maintainer = CPACodexKeeper(settings=self.settings, dry_run=True)
+        self.maintainer.cpa_client.list_auth_files_with_error = Mock(
+            side_effect=lambda: (self.maintainer.cpa_client.list_auth_files(), None)
+        )
 
     def test_filter_tokens_keeps_only_codex_type(self):
         tokens = [
@@ -54,18 +57,22 @@ class MaintainerTests(unittest.TestCase):
 
         self.assertIsNone(self.maintainer.get_list_error_type(token))
 
-    def test_get_list_error_message_returns_flat_xai_error_string(self):
+    def test_flat_codex_error_scalar_does_not_trigger_legacy_delete(self):
         token = {
+            "type": "codex",
             "status": "error",
             "status_message": (
-                '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
-                'Please ensure you are using the correct credentials."}'
+                '{"type":"authentication_error","code":"auth_unavailable",'
+                '"error":"Your authentication token has been invalidated."}'
             ),
         }
 
         self.assertEqual(
-            self.maintainer.get_list_error_message(token),
-            "Access to the chat endpoint is denied. Please ensure you are using the correct credentials.",
+            (
+                self.maintainer.get_list_error_message(token),
+                self.maintainer.should_delete_for_list_error(token),
+            ),
+            ("", False),
         )
 
     def test_get_list_error_message_keeps_nested_error_message(self):
@@ -346,6 +353,42 @@ class MaintainerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "allowed_types"):
                     self.maintainer.sweep_error_status_once(allowed_types=allowed_types)
                 self.maintainer.cpa_client.list_auth_files.assert_not_called()
+                self.maintainer.cpa_client.list_auth_files_with_error.assert_not_called()
+
+    def test_sweep_list_failure_fails_closed_without_mutation(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(
+            side_effect=AssertionError("legacy list method must not be used by the metadata sweep")
+        )
+        self.maintainer.cpa_client.list_auth_files_with_error = Mock(
+            return_value=([], "http_status=503")
+        )
+        self.maintainer.cpa_client.delete_auth_file = Mock()
+        self.maintainer.set_disabled_status = Mock()
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once(allowed_types={"xai"})
+
+        self.assertEqual(result, {
+            "scanned": 0,
+            "delete_matched": 0,
+            "would_delete": 0,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 1,
+            "skipped_busy": 0,
+        })
+        self.maintainer.cpa_client.list_auth_files_with_error.assert_called_once_with()
+        self.maintainer.cpa_client.list_auth_files.assert_not_called()
+        self.maintainer.cpa_client.delete_auth_file.assert_not_called()
+        self.maintainer.set_disabled_status.assert_not_called()
+        log_messages = [
+            call.args[1]
+            for call in self.maintainer.log.call_args_list
+            if len(call.args) > 1
+        ]
+        self.assertTrue(any("http_status=503" in message for message in log_messages))
+        self.assertFalse(any("legacy list method" in message for message in log_messages))
 
     def test_sweep_xai_scope_deletes_only_disabled_exact_xai_candidate(self):
         self.settings.xai_permission_denied_delete_enabled = True
@@ -439,6 +482,43 @@ class MaintainerTests(unittest.TestCase):
             any("would_delete=1" in message and "deleted=0" in message for message in log_messages)
         )
         self.assertFalse(any("correct credentials" in message for message in log_messages))
+
+    def test_sweep_xai_scope_uses_only_metadata_without_detail_or_usage_calls(self):
+        self.settings.xai_permission_denied_delete_enabled = True
+        self.maintainer.cpa_client.list_auth_files_with_error = Mock(return_value=([
+            {
+                "name": "xai-permission-denied.json",
+                "type": "xai",
+                "disabled": False,
+                "status": "error",
+                "status_message": (
+                    '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+                    'Please ensure you are using the correct credentials."}'
+                ),
+            },
+        ], None))
+        self.maintainer.get_token_detail = Mock(
+            side_effect=AssertionError("xAI metadata sweep must not download auth-file details")
+        )
+        self.maintainer.openai_client.check_usage = Mock(
+            side_effect=AssertionError("xAI metadata sweep must not call OpenAI usage")
+        )
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once(allowed_types={"xai"})
+
+        self.assertEqual(result, {
+            "scanned": 1,
+            "delete_matched": 1,
+            "would_delete": 1,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.get_token_detail.assert_not_called()
+        self.maintainer.openai_client.check_usage.assert_not_called()
 
     def test_sweep_deletes_auth_unavailable_error_tokens(self):
         self.maintainer.dry_run = False

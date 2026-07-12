@@ -54,11 +54,27 @@ class CPAClient:
                     continue
         return RequestResult(status_code=None, error=last_error or "request failed")
 
-    def list_auth_files(self) -> list[dict[str, Any]]:
+    def list_auth_files_with_error(self) -> tuple[list[dict[str, Any]], str | None]:
         result = self._request("GET", "/v0/management/auth-files")
-        if result.status_code != 200 or not result.json_data:
-            return []
-        return result.json_data.get("files", [])
+        if result.status_code != 200:
+            if result.status_code is None:
+                return [], "request_error"
+            return [], f"http_status={result.status_code}"
+
+        response_data = result.json_data
+        if not isinstance(response_data, dict):
+            return [], "invalid_json"
+        if "files" not in response_data:
+            return [], "missing_files"
+
+        files = response_data["files"]
+        if not isinstance(files, list):
+            return [], "invalid_files"
+        return files, None
+
+    def list_auth_files(self) -> list[dict[str, Any]]:
+        files, _ = self.list_auth_files_with_error()
+        return files
 
     def get_auth_file(self, name: str) -> dict[str, Any] | None:
         result = self._request("GET", "/v0/management/auth-files/download", params={"name": name})

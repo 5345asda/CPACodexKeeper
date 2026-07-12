@@ -138,10 +138,7 @@ class CPACodexKeeper:
         if isinstance(error, dict):
             message = error.get("message")
             return message if isinstance(message, str) else ""
-        message = status_message.get("message")
-        if isinstance(message, str):
-            return message
-        return error if isinstance(error, str) else ""
+        return ""
 
     def get_list_error_info(self, token_info):
         status_message = self._get_list_status_message(token_info)
@@ -269,7 +266,12 @@ class CPACodexKeeper:
     def sweep_error_status_once(self, *, allowed_types=None):
         allowed_types = self._normalize_error_sweep_allowed_types(allowed_types)
         result = self._empty_error_sweep_result()
-        for token_info in self.cpa_client.list_auth_files():
+        auth_files, list_error = self.cpa_client.list_auth_files_with_error()
+        if list_error is not None:
+            result["failed"] += 1
+            self.log("ERROR", f"错误状态扫尾列表获取失败: {list_error}", indent=1)
+            auth_files = []
+        for token_info in auth_files:
             token_type = token_info.get("type")
             if token_type not in allowed_types:
                 continue
