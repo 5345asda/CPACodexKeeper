@@ -138,7 +138,8 @@ class CPACodexKeeper:
         if isinstance(error, dict):
             message = error.get("message")
             return message if isinstance(message, str) else ""
-        return ""
+        message = status_message.get("message")
+        return message if isinstance(message, str) else ""
 
     def get_list_error_info(self, token_info):
         status_message = self._get_list_status_message(token_info)

@@ -75,6 +75,25 @@ class MaintainerTests(unittest.TestCase):
             ("", False),
         )
 
+    def test_flat_codex_message_preserves_legacy_invalidated_delete(self):
+        message = "Your authentication token has been invalidated."
+        token = {
+            "type": "codex",
+            "status": "error",
+            "status_message": (
+                '{"type":"authentication_error","code":"auth_unavailable",'
+                f'"message":"{message}"}}'
+            ),
+        }
+
+        self.assertEqual(
+            (
+                self.maintainer.get_list_error_message(token),
+                self.maintainer.should_delete_for_list_error(token),
+            ),
+            (message, True),
+        )
+
     def test_get_list_error_message_keeps_nested_error_message(self):
         token = {
             "status": "error",
