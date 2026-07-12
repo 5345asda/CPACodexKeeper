@@ -213,6 +213,39 @@ class CPACodexKeeper:
             "skipped_busy": skipped_busy,
         }
 
+    @staticmethod
+    def _normalize_error_sweep_allowed_types(allowed_types):
+        if allowed_types is None:
+            return ERROR_SWEEP_SUPPORTED_TYPES
+        if isinstance(allowed_types, str):
+            raw_types = (allowed_types,)
+        else:
+            try:
+                raw_types = tuple(allowed_types)
+            except TypeError as exc:
+                raise ValueError(
+                    "allowed_types must be a provider string or iterable of provider strings"
+                ) from exc
+
+        normalized_types = set()
+        for provider_type in raw_types:
+            if not isinstance(provider_type, str):
+                raise ValueError("allowed_types must contain only provider strings")
+            provider_type = provider_type.strip().lower()
+            if not provider_type:
+                raise ValueError("allowed_types must not contain empty provider types")
+            normalized_types.add(provider_type)
+
+        if not normalized_types:
+            raise ValueError("allowed_types must contain at least one provider type")
+        unsupported_types = normalized_types - ERROR_SWEEP_SUPPORTED_TYPES
+        if unsupported_types:
+            unsupported_labels = ", ".join(sorted(unsupported_types))
+            raise ValueError(
+                f"allowed_types contains unsupported provider type(s): {unsupported_labels}"
+            )
+        return frozenset(normalized_types)
+
     def _reserve_error_sweep_target(self, name, result, error_label):
         if not self._reserve_token_name(name):
             result["skipped_busy"] += 1
@@ -221,10 +254,7 @@ class CPACodexKeeper:
         return True
 
     def sweep_error_status_once(self, *, allowed_types=None):
-        if allowed_types is None:
-            allowed_types = ERROR_SWEEP_SUPPORTED_TYPES
-        else:
-            allowed_types = frozenset(allowed_types) & ERROR_SWEEP_SUPPORTED_TYPES
+        allowed_types = self._normalize_error_sweep_allowed_types(allowed_types)
         result = self._empty_error_sweep_result()
         for token_info in self.cpa_client.list_auth_files():
             token_type = token_info.get("type")

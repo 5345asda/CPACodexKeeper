@@ -287,6 +287,53 @@ class MaintainerTests(unittest.TestCase):
         self.assertFalse(self.maintainer._was_sweep_mutated("xai-active.json"))
         self.assertFalse(self.maintainer._was_sweep_mutated("vertex-active.json"))
 
+    def test_sweep_scope_normalizes_scalar_xai_provider_type(self):
+        self.settings.xai_permission_denied_delete_enabled = True
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "xai-permission-denied.json",
+                "type": "xai",
+                "disabled": False,
+                "status": "error",
+                "status_message": (
+                    '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+                    'Please ensure you are using the correct credentials."}'
+                ),
+            },
+        ])
+        self.maintainer.log = Mock()
+
+        for allowed_types in ("xai", " XAI "):
+            with self.subTest(allowed_types=allowed_types):
+                result = self.maintainer.sweep_error_status_once(allowed_types=allowed_types)
+
+                self.assertEqual(result, {
+                    "scanned": 1,
+                    "delete_matched": 1,
+                    "would_delete": 1,
+                    "disable_matched": 0,
+                    "deleted": 0,
+                    "disabled": 0,
+                    "failed": 0,
+                    "skipped_busy": 0,
+                })
+
+    def test_sweep_scope_rejects_invalid_provider_types_before_listing_auth_files(self):
+        self.maintainer.cpa_client.list_auth_files = Mock()
+        invalid_scopes = (
+            "vertex",
+            ["xai", "vertex"],
+            ["xai", 1],
+            " ",
+            [],
+        )
+
+        for allowed_types in invalid_scopes:
+            with self.subTest(allowed_types=allowed_types):
+                with self.assertRaisesRegex(ValueError, "allowed_types"):
+                    self.maintainer.sweep_error_status_once(allowed_types=allowed_types)
+                self.maintainer.cpa_client.list_auth_files.assert_not_called()
+
     def test_sweep_xai_scope_deletes_only_disabled_exact_xai_candidate(self):
         self.settings.xai_permission_denied_delete_enabled = True
         self.maintainer.dry_run = False
