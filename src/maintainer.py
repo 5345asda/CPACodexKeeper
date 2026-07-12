@@ -165,6 +165,14 @@ class CPACodexKeeper:
             return {}
         return status_message
 
+    def _get_flat_xai_error(self, token_info):
+        status_message = self._get_list_status_message(token_info)
+        error_code = status_message.get("code")
+        error_message = status_message.get("error")
+        if not isinstance(error_code, str) or not isinstance(error_message, str):
+            return None
+        return error_code, error_message
+
     def should_disable_for_list_error(self, token_info):
         if token_info.get("type") != "codex":
             return False
@@ -180,9 +188,14 @@ class CPACodexKeeper:
             return False
         if not self.settings.xai_permission_denied_delete_enabled:
             return False
-        if self.get_list_error_code(token_info) != "permission-denied":
+        flat_error = self._get_flat_xai_error(token_info)
+        if flat_error is None:
             return False
-        return "access to the chat endpoint is denied" in self.get_list_error_message(token_info).lower()
+        error_code, error_message = flat_error
+        return (
+            error_code == "permission-denied"
+            and "access to the chat endpoint is denied" in error_message.lower()
+        )
 
     def should_delete_for_list_error(self, token_info):
         if self.should_delete_for_xai_permission_denied(token_info):

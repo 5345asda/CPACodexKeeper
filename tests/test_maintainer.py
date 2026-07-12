@@ -94,6 +94,19 @@ class MaintainerTests(unittest.TestCase):
             ("", False),
         )
 
+    def test_should_not_delete_xai_nested_permission_denied_error_when_enabled(self):
+        self.settings.xai_permission_denied_delete_enabled = True
+        token = {
+            "type": "xai",
+            "status": "error",
+            "status_message": (
+                '{"error":{"code":"permission-denied",'
+                '"message":"Access to the chat endpoint is denied."}}'
+            ),
+        }
+
+        self.assertFalse(self.maintainer.should_delete_for_list_error(token))
+
     def test_should_delete_xai_chat_permission_denied_when_enabled(self):
         self.settings.xai_permission_denied_delete_enabled = True
         token = {
