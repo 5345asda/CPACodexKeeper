@@ -74,7 +74,16 @@ CPACodexKeeper 会把这些维护动作自动化，减少人工巡检和手工�
 
 这是一个**按轮次运行、轮内可并发**的流程：一轮结束后才会进入下一轮，但同一轮中的多个 token 可以并发巡检。
 
-守护模式还会启动一个轻量错误扫尾任务。它默认每 60 秒只读取 CPA 列表元数据，不下载 token 详情、不调用 OpenAI usage、不刷新、也不重新启用。默认只删除同时满足 `type=authentication_error`、`code=auth_unavailable` 且 message 包含 `invalidated` 的认证失效错误，并把 `type=usage_limit_reached` 这类额度错误设置为禁用。这样可以快速处理前端红框错误，同时避免和完整巡检的启用、删除、刷新逻辑冲突。
+守护模式还会启动一个轻量错误扫尾任务。它默认每 60 秒只读取 CPA 列表元数据，支持 `codex` 和 `xai` 两类列表项；不下载 token 详情、不调用 OpenAI usage、不刷新、也不重新启用。默认只删除同时满足 `type=authentication_error`、`code=auth_unavailable` 且 message 包含 `invalidated` 的认证失效错误，并把 `type=usage_limit_reached` 这类额度错误设置为禁用。这样可以快速处理前端红框错误，同时避免和完整巡检的启用、删除、刷新逻辑冲突。
+
+xAI 的 chat endpoint 权限拒绝删除默认关闭，只有设置 `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true` 后才会生效。必须同时满足以下全部条件才会删除：
+
+- 列表项 `type` 等于 `xai`
+- 列表项 `status` 等于 `error`
+- `status_message` 顶层 `code` 精确等于 `permission-denied`
+- `status_message` 顶层标量 `error` 字符串不区分大小写地包含 `access to the chat endpoint is denied`
+
+已启用和已禁用的精确匹配 xAI 文件都可删除。字段缺失、JSON 格式无效、`error` 不是字符串或只有近似错误文案时，均不会删除。
 
 ---
 
@@ -144,6 +153,7 @@ cp .env.example .env
 - `CPA_ENABLE_REFRESH`：是否启用对禁用 token 的自动刷新，默认 `true`
 - `CPA_ERROR_SWEEP_ENABLED`：是否启用守护模式轻量错误扫尾，默认 `true`
 - `CPA_ERROR_SWEEP_INTERVAL`：错误扫尾间隔秒数，默认 `60`
+- `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED`：是否启用严格的 xAI chat endpoint 权限拒绝删除，默认 `false`
 - `CPA_ERROR_DISABLE_TYPES`：触发自动禁用的列表级错误类型，逗号分隔，默认 `usage_limit_reached`
 - `CPA_ERROR_DELETE_TYPES`：触发自动删除的列表级错误类型，逗号分隔，默认 `authentication_error`
 - `CPA_ERROR_DELETE_CODES`：触发自动删除的列表级错误 code，逗号分隔，默认 `auth_unavailable`
@@ -157,7 +167,7 @@ cp .env.example .env
 
 默认开启自动刷新，但 keeper 仍只会刷新当前轮处理后仍处于禁用状态的 token；启用状态 token 交给 CPA 自己的自动刷新逻辑处理。如果你需要避免与其他刷新写入方竞争，可以在 `.env` 里显式设成 `false`。
 
-默认开启错误扫尾。扫尾任务会先处理删除规则，再处理禁用规则；不会启用或刷新。删除规则默认要求错误 type、code、message 关键词同时命中，避免把临时 auth-pool 不可用误删。错误扫尾和完整巡检可同时运行，但同一个 token 会先通过按文件名预留/占用互斥，避免同名 token 被两个任务重复写入；删除和状态修改也会通过同一个写入互斥入口串行执行。
+默认开启错误扫尾。扫尾任务会先处理删除规则，再处理禁用规则；不会启用或刷新。Codex 默认删除规则要求错误 type、code、message 关键词同时命中，避免把临时 auth-pool 不可用误删。xAI 规则独立于这些可配置的 Codex 规则，且默认关闭。错误扫尾和完整巡检可同时运行，但同一个 token 会先通过按文件名预留/占用互斥，避免同名 token 被两个任务重复写入；删除和状态修改也会通过同一个写入互斥入口串行执行。
 
 ---
 
@@ -198,6 +208,24 @@ python main.py
 ```bash
 python main.py --once --dry-run
 ```
+
+### xAI `permission-denied` 清理
+
+完整 `--once` 始终只处理 `type=codex`。`--xai-error-sweep-once` 只读取 xAI 列表元数据，不下载 auth file 详情，也不调用 OpenAI usage。
+
+先在 `.env` 中设置 `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true`，再进行不修改数据的预检：
+
+```bash
+python main.py --dry-run --xai-error-sweep-once
+```
+
+确认预检候选后，使用相同设置执行限定删除：
+
+```bash
+python main.py --xai-error-sweep-once
+```
+
+扫尾结果报告失败时，该命令返回退出码 `1`；没有候选项时是成功的无操作，返回 `0`。`--daemon`、`--once` 和 `--xai-error-sweep-once` 互斥，必须使用完整选项名，`--xai` 这类缩写会被拒绝。
 
 ---
 

@@ -74,7 +74,16 @@ Each inspection round follows this sequence:
 
 This process is **round-based with intra-round concurrency**. One full round still completes before the next round starts, but multiple tokens can be inspected concurrently within the same round.
 
-Daemon mode also starts a lightweight error sweep. By default, every 60 seconds it reads only CPA list metadata. It does not download token details, call OpenAI usage, refresh, or re-enable tokens. By default it deletes only authentication-invalidated errors where `type=authentication_error`, `code=auth_unavailable`, and the message contains `invalidated`; it disables quota errors such as `type=usage_limit_reached`. This quickly handles frontend red-box errors without conflicting with the full maintenance loop.
+Daemon mode also starts a lightweight error sweep. By default, every 60 seconds it reads only CPA list metadata for `codex` and `xai` entries. It does not download token details, call OpenAI usage, refresh, or re-enable tokens. By default it deletes only authentication-invalidated errors where `type=authentication_error`, `code=auth_unavailable`, and the message contains `invalidated`; it disables quota errors such as `type=usage_limit_reached`. This quickly handles frontend red-box errors without conflicting with the full maintenance loop.
+
+xAI chat-endpoint permission cleanup is disabled by default and requires `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true`. Deletion requires every one of these conditions:
+
+- list `type` is exactly `xai`
+- list `status` is exactly `error`
+- top-level `code` in `status_message` is exactly `permission-denied`
+- the top-level scalar `error` string in `status_message` contains `access to the chat endpoint is denied`, case-insensitively
+
+Both enabled and disabled exact-match xAI files are eligible. Missing fields, malformed JSON, a non-string `error`, or near matches do not delete.
 
 ---
 
@@ -143,6 +152,7 @@ Then edit `.env`.
 - `CPA_ENABLE_REFRESH`: whether automatic refresh for disabled tokens is enabled, default `true`
 - `CPA_ERROR_SWEEP_ENABLED`: whether daemon mode runs the lightweight error sweep, default `true`
 - `CPA_ERROR_SWEEP_INTERVAL`: error sweep interval in seconds, default `60`
+- `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED`: whether to enable strict xAI chat-endpoint permission cleanup, default `false`
 - `CPA_ERROR_DISABLE_TYPES`: comma-separated list-level error types that trigger auto-disable, default `usage_limit_reached`
 - `CPA_ERROR_DELETE_TYPES`: comma-separated list-level error types that trigger auto-delete, default `authentication_error`
 - `CPA_ERROR_DELETE_CODES`: comma-separated list-level error codes that trigger auto-delete, default `auth_unavailable`
@@ -156,7 +166,7 @@ The `.env.example` file already includes bilingual comments for direct editing.
 
 Automatic refresh is enabled by default, but the keeper still refreshes only tokens that remain disabled after quota handling; enabled tokens are left to CPA's own auto-refresh logic. If you need to avoid competing with another writer rotating the same shared `refresh_token`, set it to `false` in `.env`.
 
-The error sweep is enabled by default. It applies delete rules before disable rules, and never enables or refreshes tokens. The default delete rule requires error type, code, and message keyword matches so transient auth-pool unavailability is not deleted. The error sweep and the full maintenance round may run at the same time, but each token name is reserved before mutation so the two tasks do not write the same auth file concurrently; delete and status writes also go through the same serialized mutation path.
+The error sweep is enabled by default. It applies delete rules before disable rules, and never enables or refreshes tokens. The default Codex delete rule requires error type, code, and message keyword matches so transient auth-pool unavailability is not deleted. The xAI rule is separate from those configurable Codex rules and remains disabled by default. The error sweep and the full maintenance round may run at the same time, but each token name is reserved before mutation so the two tasks do not write the same auth file concurrently; delete and status writes also go through the same serialized mutation path.
 
 ---
 
@@ -197,6 +207,24 @@ This will not actually delete, disable, enable, or upload updates:
 ```bash
 python main.py --once --dry-run
 ```
+
+### xAI `permission-denied` cleanup
+
+Full `--once` maintenance always processes only `type=codex`. `--xai-error-sweep-once` reads only xAI list metadata; it does not download auth-file details or call OpenAI usage.
+
+First set `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true` in `.env`, then run the non-mutating preflight:
+
+```bash
+python main.py --dry-run --xai-error-sweep-once
+```
+
+After confirming the preflight candidates, run the scoped deletion with the same setting:
+
+```bash
+python main.py --xai-error-sweep-once
+```
+
+The command exits with `1` when the sweep reports failures. Zero candidates is a successful no-op with exit code `0`. `--daemon`, `--once`, and `--xai-error-sweep-once` are mutually exclusive, and the full option name is required: abbreviations such as `--xai` are rejected.
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Delete only explicitly enabled xAI auth files whose CPA list metadata proves that the xAI chat endpoint is permanently permission-denied.
+**Goal:** Delete only xAI auth files whose CPA list metadata matches the exact xAI chat-endpoint permission-denied signature.
 
 **Architecture:** Keep full maintenance Codex-only. Extend the existing metadata-only error sweep with a fail-closed xAI policy that recognizes the flat `{code, error}` payload, and add a scoped one-shot CLI mode for safe xAI preflight and deletion. Existing generic Codex delete and disable settings remain unchanged.
 
@@ -31,7 +31,8 @@ the variable with a default of `false`.
 Run:
 
 ```powershell
-python -m unittest tests.test_settings tests.test_docker_compose
+python -m unittest discover -s tests -p test_settings.py
+python -m unittest discover -s tests -p test_docker_compose.py
 ```
 
 Expected: failures for the missing setting and Compose variable.
@@ -86,7 +87,7 @@ top-level `error`.
 Run:
 
 ```powershell
-python -m unittest tests.test_maintainer.MaintainerTests.test_xai_permission_denied_list_error_matches_when_enabled
+python -m unittest discover -s tests -p test_maintainer.py
 ```
 
 Expected: failure because the scalar `error` string is not exposed as a
@@ -102,8 +103,8 @@ legacy Codex deletion predicate. Keep all existing Codex logic unchanged.
 
 **Step 4: Run focused matcher tests to verify they pass**
 
-Run the focused command plus the existing invalidated-auth tests. Expected:
-all pass.
+Run the discovery command, which also covers the existing invalidated-auth
+tests. Expected: all pass.
 
 **Step 5: Commit the matcher change**
 
@@ -133,7 +134,7 @@ Add tests proving that a scoped xAI sweep:
 Run:
 
 ```powershell
-python -m unittest tests.test_maintainer.MaintainerTests.test_xai_scoped_sweep_deletes_only_xai_matches
+python -m unittest discover -s tests -p test_maintainer.py
 ```
 
 Expected: failure because the sweep has no provider scope and skips xAI rows.
@@ -175,7 +176,7 @@ Add tests that `--xai-error-sweep-once` calls
 Run:
 
 ```powershell
-python -m unittest tests.test_cli
+python -m unittest discover -s tests -p test_cli.py
 ```
 
 Expected: argparse rejects the new flag.
