@@ -13,6 +13,7 @@ DEFAULT_WORKER_THREADS = 8
 DEFAULT_ENABLE_REFRESH = True
 DEFAULT_ERROR_SWEEP_ENABLED = True
 DEFAULT_ERROR_SWEEP_INTERVAL_SECONDS = 60
+DEFAULT_XAI_PERMISSION_DENIED_DELETE_ENABLED = False
 DEFAULT_ERROR_DISABLE_TYPES = frozenset({"usage_limit_reached"})
 DEFAULT_ERROR_DELETE_TYPES = frozenset({"authentication_error"})
 DEFAULT_ERROR_DELETE_CODES = frozenset({"auth_unavailable"})
@@ -39,6 +40,7 @@ class Settings:
     enable_refresh: bool = DEFAULT_ENABLE_REFRESH
     error_sweep_enabled: bool = DEFAULT_ERROR_SWEEP_ENABLED
     error_sweep_interval_seconds: int = DEFAULT_ERROR_SWEEP_INTERVAL_SECONDS
+    xai_permission_denied_delete_enabled: bool = DEFAULT_XAI_PERMISSION_DENIED_DELETE_ENABLED
     error_disable_types: frozenset[str] = DEFAULT_ERROR_DISABLE_TYPES
     error_delete_types: frozenset[str] = DEFAULT_ERROR_DELETE_TYPES
     error_delete_codes: frozenset[str] = DEFAULT_ERROR_DELETE_CODES
@@ -139,6 +141,11 @@ def load_settings(env_file: Path | None = None) -> Settings:
             DEFAULT_ERROR_SWEEP_INTERVAL_SECONDS,
             env_values,
             minimum=1,
+        ),
+        xai_permission_denied_delete_enabled=_read_bool(
+            "CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED",
+            DEFAULT_XAI_PERMISSION_DENIED_DELETE_ENABLED,
+            env_values,
         ),
         error_disable_types=_read_csv_set("CPA_ERROR_DISABLE_TYPES", DEFAULT_ERROR_DISABLE_TYPES, env_values),
         error_delete_types=_read_csv_set("CPA_ERROR_DELETE_TYPES", DEFAULT_ERROR_DELETE_TYPES, env_values),

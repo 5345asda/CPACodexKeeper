@@ -29,10 +29,25 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(settings.enable_refresh)
         self.assertTrue(settings.error_sweep_enabled)
         self.assertEqual(settings.error_sweep_interval_seconds, 60)
+        self.assertFalse(settings.xai_permission_denied_delete_enabled)
         self.assertEqual(settings.error_disable_types, frozenset({"usage_limit_reached"}))
         self.assertEqual(settings.error_delete_types, frozenset({"authentication_error"}))
         self.assertEqual(settings.error_delete_codes, frozenset({"auth_unavailable"}))
         self.assertEqual(settings.error_delete_message_keywords, frozenset({"invalidated"}))
+
+    def test_load_settings_reads_xai_permission_denied_delete_enabled(self):
+        with patch.dict(
+            os.environ,
+            {
+                "CPA_ENDPOINT": "https://example.com",
+                "CPA_TOKEN": "secret",
+                "CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            settings = load_settings()
+
+        self.assertTrue(settings.xai_permission_denied_delete_enabled)
 
     def test_load_settings_reads_from_project_env_file(self):
         env_file = self._make_env_file(

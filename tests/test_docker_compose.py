@@ -14,6 +14,10 @@ class DockerComposeTests(unittest.TestCase):
         self.assertIn("CPA_WORKER_THREADS:", compose_text)
         self.assertIn("CPA_ERROR_SWEEP_ENABLED: ${CPA_ERROR_SWEEP_ENABLED:-true}", compose_text)
         self.assertIn("CPA_ERROR_SWEEP_INTERVAL: ${CPA_ERROR_SWEEP_INTERVAL:-60}", compose_text)
+        self.assertIn(
+            "CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED: ${CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED:-false}",
+            compose_text,
+        )
         self.assertIn("CPA_ERROR_DISABLE_TYPES: ${CPA_ERROR_DISABLE_TYPES:-usage_limit_reached}", compose_text)
         self.assertIn("CPA_ERROR_DELETE_TYPES: ${CPA_ERROR_DELETE_TYPES:-authentication_error}", compose_text)
         self.assertIn("CPA_ERROR_DELETE_CODES: ${CPA_ERROR_DELETE_CODES:-auth_unavailable}", compose_text)
