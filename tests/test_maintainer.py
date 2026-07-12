@@ -195,6 +195,7 @@ class MaintainerTests(unittest.TestCase):
         self.assertEqual(result, {
             "scanned": 2,
             "delete_matched": 0,
+            "would_delete": 0,
             "disable_matched": 1,
             "deleted": 0,
             "disabled": 1,
@@ -233,8 +234,9 @@ class MaintainerTests(unittest.TestCase):
         result = self.maintainer.sweep_error_status_once()
 
         self.assertEqual(result, {
-            "scanned": 2,
+            "scanned": 3,
             "delete_matched": 0,
+            "would_delete": 0,
             "disable_matched": 0,
             "deleted": 0,
             "disabled": 0,
@@ -243,7 +245,143 @@ class MaintainerTests(unittest.TestCase):
         })
         self.maintainer.set_disabled_status.assert_not_called()
 
+    def test_sweep_default_scope_scans_codex_and_xai_metadata(self):
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-active.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "active",
+                "status_message": "",
+            },
+            {
+                "name": "xai-active.json",
+                "type": "xai",
+                "disabled": False,
+                "status": "active",
+                "status_message": "",
+            },
+            {
+                "name": "vertex-active.json",
+                "type": "vertex",
+                "disabled": False,
+                "status": "active",
+                "status_message": "",
+            },
+        ])
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once()
+
+        self.assertEqual(result, {
+            "scanned": 2,
+            "delete_matched": 0,
+            "would_delete": 0,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.assertFalse(self.maintainer._was_sweep_mutated("codex-active.json"))
+        self.assertFalse(self.maintainer._was_sweep_mutated("xai-active.json"))
+        self.assertFalse(self.maintainer._was_sweep_mutated("vertex-active.json"))
+
+    def test_sweep_xai_scope_deletes_only_disabled_exact_xai_candidate(self):
+        self.settings.xai_permission_denied_delete_enabled = True
+        self.maintainer.dry_run = False
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "codex-invalidated.json",
+                "type": "codex",
+                "disabled": False,
+                "status": "error",
+                "status_message": (
+                    '{"error":{"message":"Your authentication token has been invalidated.",'
+                    '"type":"authentication_error","code":"auth_unavailable"}}'
+                ),
+            },
+            {
+                "name": "xai-permission-denied.json",
+                "type": "xai",
+                "disabled": True,
+                "status": "error",
+                "status_message": (
+                    '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+                    'Please ensure you are using the correct credentials."}'
+                ),
+            },
+        ])
+        self.maintainer.cpa_client.delete_auth_file = Mock(return_value=True)
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once(allowed_types={"xai"})
+
+        self.assertEqual(result, {
+            "scanned": 1,
+            "delete_matched": 1,
+            "would_delete": 0,
+            "disable_matched": 0,
+            "deleted": 1,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.cpa_client.delete_auth_file.assert_called_once_with("xai-permission-denied.json")
+        self.assertFalse(self.maintainer._was_sweep_mutated("codex-invalidated.json"))
+        self.assertTrue(self.maintainer._was_sweep_mutated("xai-permission-denied.json"))
+        self.assertTrue(
+            any(
+                "type=xai" in call.args[1]
+                for call in self.maintainer.log.call_args_list
+                if len(call.args) > 1
+            )
+        )
+
+    def test_sweep_dry_run_xai_permission_denied_reports_would_delete_without_mutation(self):
+        self.settings.xai_permission_denied_delete_enabled = True
+        self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
+            {
+                "name": "xai-permission-denied.json",
+                "type": "xai",
+                "disabled": True,
+                "status": "error",
+                "status_message": (
+                    '{"code":"permission-denied","error":"Access to the chat endpoint is denied. '
+                    'Please ensure you are using the correct credentials."}'
+                ),
+            },
+        ])
+        self.maintainer.cpa_client.delete_auth_file = Mock(return_value=True)
+        self.maintainer.log = Mock()
+
+        result = self.maintainer.sweep_error_status_once(allowed_types={"xai"})
+
+        self.assertEqual(result, {
+            "scanned": 1,
+            "delete_matched": 1,
+            "would_delete": 1,
+            "disable_matched": 0,
+            "deleted": 0,
+            "disabled": 0,
+            "failed": 0,
+            "skipped_busy": 0,
+        })
+        self.maintainer.cpa_client.delete_auth_file.assert_not_called()
+        self.assertFalse(self.maintainer._was_sweep_mutated("xai-permission-denied.json"))
+        log_messages = [
+            call.args[1]
+            for call in self.maintainer.log.call_args_list
+            if len(call.args) > 1
+        ]
+        self.assertTrue(any("type=xai" in message for message in log_messages))
+        self.assertTrue(
+            any("would_delete=1" in message and "deleted=0" in message for message in log_messages)
+        )
+        self.assertFalse(any("correct credentials" in message for message in log_messages))
+
     def test_sweep_deletes_auth_unavailable_error_tokens(self):
+        self.maintainer.dry_run = False
         self.maintainer.cpa_client.list_auth_files = Mock(return_value=[
             {
                 "name": "codex-invalidated.json",
@@ -266,7 +404,7 @@ class MaintainerTests(unittest.TestCase):
                 ),
             },
         ])
-        self.maintainer.delete_token = Mock(return_value=True)
+        self.maintainer.cpa_client.delete_auth_file = Mock(return_value=True)
         self.maintainer.set_disabled_status = Mock(return_value=True)
         self.maintainer.log = Mock()
 
@@ -275,14 +413,15 @@ class MaintainerTests(unittest.TestCase):
         self.assertEqual(result, {
             "scanned": 2,
             "delete_matched": 2,
+            "would_delete": 0,
             "disable_matched": 0,
             "deleted": 2,
             "disabled": 0,
             "failed": 0,
             "skipped_busy": 0,
         })
-        self.maintainer.delete_token.assert_any_call("codex-invalidated.json")
-        self.maintainer.delete_token.assert_any_call("codex-disabled-invalidated.json")
+        self.maintainer.cpa_client.delete_auth_file.assert_any_call("codex-invalidated.json")
+        self.maintainer.cpa_client.delete_auth_file.assert_any_call("codex-disabled-invalidated.json")
         self.maintainer.set_disabled_status.assert_not_called()
 
     def test_sweep_does_not_delete_auth_unavailable_without_invalidated_message(self):
@@ -311,6 +450,7 @@ class MaintainerTests(unittest.TestCase):
         self.assertEqual(result, {
             "scanned": 2,
             "delete_matched": 0,
+            "would_delete": 0,
             "disable_matched": 0,
             "deleted": 0,
             "disabled": 0,
@@ -341,6 +481,7 @@ class MaintainerTests(unittest.TestCase):
         self.assertEqual(result, {
             "scanned": 1,
             "delete_matched": 0,
+            "would_delete": 0,
             "disable_matched": 1,
             "deleted": 0,
             "disabled": 1,
@@ -369,6 +510,7 @@ class MaintainerTests(unittest.TestCase):
         self.assertEqual(result, {
             "scanned": 1,
             "delete_matched": 0,
+            "would_delete": 0,
             "disable_matched": 1,
             "deleted": 0,
             "disabled": 0,

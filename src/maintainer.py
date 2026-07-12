@@ -12,6 +12,9 @@ from .settings import Settings
 from .utils import format_seconds, get_expired_remaining, get_expired_remaining_with_status
 
 
+ERROR_SWEEP_SUPPORTED_TYPES = frozenset({"codex", "xai"})
+
+
 class CPACodexKeeper:
     def __init__(self, settings: Settings, dry_run: bool = False):
         self.settings = settings
@@ -202,6 +205,7 @@ class CPACodexKeeper:
         return {
             "scanned": 0,
             "delete_matched": 0,
+            "would_delete": 0,
             "disable_matched": 0,
             "deleted": 0,
             "disabled": 0,
@@ -216,32 +220,40 @@ class CPACodexKeeper:
             return False
         return True
 
-    def sweep_error_status_once(self):
+    def sweep_error_status_once(self, *, allowed_types=None):
+        if allowed_types is None:
+            allowed_types = ERROR_SWEEP_SUPPORTED_TYPES
+        else:
+            allowed_types = frozenset(allowed_types) & ERROR_SWEEP_SUPPORTED_TYPES
         result = self._empty_error_sweep_result()
         for token_info in self.cpa_client.list_auth_files():
-            if token_info.get("type") != "codex":
+            token_type = token_info.get("type")
+            if token_type not in allowed_types:
                 continue
             result["scanned"] += 1
             name = token_info.get("name")
             error_type = self.get_list_error_type(token_info) or "unknown"
             error_code = self.get_list_error_code(token_info) or "unknown"
+            error_label = f"type={token_type} {error_type}/{error_code}"
             if self.should_delete_for_list_error(token_info):
                 result["delete_matched"] += 1
                 if not name:
                     result["failed"] += 1
-                    self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}/{error_code}", indent=1)
+                    self.log("ERROR", f"错误状态扫尾缺少文件名: {error_label}", indent=1)
                     continue
-                if not self._reserve_error_sweep_target(name, result, f"{error_type}/{error_code}"):
+                if not self._reserve_error_sweep_target(name, result, error_label):
                     continue
                 try:
-                    self.log("WARN", f"错误状态 {error_type}/{error_code}，准备删除: {name}", indent=1)
-                    if self.delete_token(name):
+                    if self.dry_run:
+                        result["would_delete"] += 1
+                        self.log("DRY", f"错误状态 {error_label}，演练将删除: {name}", indent=1)
+                    elif self.delete_token(name):
                         result["deleted"] += 1
                         self._mark_sweep_mutated(name)
-                        self.log("DELETE", f"错误状态已删除: {name}", indent=1)
+                        self.log("DELETE", f"错误状态 {error_label} 已删除: {name}", indent=1)
                     else:
                         result["failed"] += 1
-                        self.log("ERROR", f"错误状态删除失败: {name}", indent=1)
+                        self.log("ERROR", f"错误状态 {error_label} 删除失败: {name}", indent=1)
                 finally:
                     self._release_token_name(name)
                 continue
@@ -250,19 +262,19 @@ class CPACodexKeeper:
             result["disable_matched"] += 1
             if not name:
                 result["failed"] += 1
-                self.log("ERROR", f"错误状态扫尾缺少文件名: {error_type}", indent=1)
+                self.log("ERROR", f"错误状态扫尾缺少文件名: {error_label}", indent=1)
                 continue
-            if not self._reserve_error_sweep_target(name, result, error_type):
+            if not self._reserve_error_sweep_target(name, result, error_label):
                 continue
             try:
-                self.log("WARN", f"错误状态 {error_type}，准备禁用: {name}", indent=1)
+                self.log("WARN", f"错误状态 {error_label}，准备禁用: {name}", indent=1)
                 if self.set_disabled_status(name, disabled=True):
                     result["disabled"] += 1
                     self._mark_sweep_mutated(name)
-                    self.log("DISABLE", f"错误状态已禁用: {name}", indent=1)
+                    self.log("DISABLE", f"错误状态 {error_label} 已禁用: {name}", indent=1)
                 else:
                     result["failed"] += 1
-                    self.log("ERROR", f"错误状态禁用失败: {name}", indent=1)
+                    self.log("ERROR", f"错误状态 {error_label} 禁用失败: {name}", indent=1)
             finally:
                 self._release_token_name(name)
         self.log(
@@ -270,7 +282,8 @@ class CPACodexKeeper:
             (
                 "错误状态扫尾完成: "
                 f"scanned={result['scanned']} delete_matched={result['delete_matched']} "
-                f"disable_matched={result['disable_matched']} deleted={result['deleted']} "
+                f"would_delete={result['would_delete']} disable_matched={result['disable_matched']} "
+                f"deleted={result['deleted']} "
                 f"disabled={result['disabled']} failed={result['failed']} "
                 f"skipped_busy={result['skipped_busy']}"
             ),
