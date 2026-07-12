@@ -95,11 +95,12 @@ message and no xAI rule exists.
 
 **Step 3: Implement the fail-closed predicate**
 
-Update `get_list_error_message()` to return a string `message` when present,
-or the flat scalar `error` when present. Add an xAI-only predicate that requires
-`type == "xai"`, `status == "error"`, exact `permission-denied`, the lowercased
-chat-endpoint phrase, and the dedicated enabled setting. Call it before the
-legacy Codex deletion predicate. Keep all existing Codex logic unchanged.
+Keep `get_list_error_message()` scoped to its existing Codex-compatible
+`message` and nested `error.message` fields. Add an xAI-only predicate that
+reads the flat scalar `error` directly and requires `type == "xai"`,
+`status == "error"`, exact `permission-denied`, the lowercased chat-endpoint
+phrase, and the dedicated enabled setting. Call it before the legacy Codex
+deletion predicate without broadening the generic Codex logic.
 
 **Step 4: Run focused matcher tests to verify they pass**
 
@@ -169,7 +170,8 @@ git commit -m "feat: scope xai error sweep"
 
 Add tests that `--xai-error-sweep-once` calls
 `sweep_error_status_once(allowed_types={"xai"})`, does not call `run()` or
-`run_forever()`, and can be combined with `--dry-run`.
+`run_forever()`, can be combined with `--dry-run`, and rejects both forms with
+exit code `2` unless `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true` is set.
 
 **Step 2: Run focused CLI tests to verify they fail**
 
@@ -184,8 +186,10 @@ Expected: argparse rejects the new flag.
 **Step 3: Implement the narrow CLI branch**
 
 Add `--xai-error-sweep-once`. Handle it before daemon or full-run dispatch,
-calling only the provider-scoped metadata sweep. Preserve current `--once`
-behavior exactly.
+calling only the provider-scoped metadata sweep. Require
+`CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true` before constructing the
+maintainer for either dry-run or mutation. Preserve current `--once` behavior
+exactly.
 
 **Step 4: Run focused CLI tests to verify they pass**
 

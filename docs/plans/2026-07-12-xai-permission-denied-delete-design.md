@@ -44,10 +44,10 @@ or a near-match message must never delete a file.
 
 The implementation keeps the existing Codex list-error rules unchanged.
 
-- Normalize a top-level string `error` into the list-error message accessor.
-  Nested Codex `error.message` remains the preferred existing behavior.
-- Add a dedicated xAI predicate rather than extending the global Codex
-  `CPA_ERROR_DELETE_*` sets.
+- Keep the legacy Codex list-error message accessor limited to its existing
+  `message` and nested `error.message` fields.
+- Read a top-level scalar `error` only inside the dedicated xAI predicate, so
+  an xAI payload cannot broaden the generic Codex deletion policy.
 - Let the lightweight error sweep consider only `codex` and `xai` list rows.
   Full maintenance continues to filter to Codex rows only.
 - Add an xAI-only one-shot CLI mode. It invokes the metadata sweep with an
@@ -65,16 +65,20 @@ CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=false
 
 The exact provider, error code, and message fragment remain static code policy.
 This prevents an accidental environment change from broadening the deletion
-surface. Production explicitly enables the switch only after a dry-run
-preflight has produced the expected xAI-only candidates.
+surface. Both the xAI dry-run and the actual one-shot require the switch to be
+enabled; operators can keep the persistent setting disabled and supply a
+process-scoped enabled value for the preflight. Production enables the
+persistent switch only after a dry-run preflight has produced the expected
+xAI-only candidates.
 
 ## CLI And Operations
 
 Add `--xai-error-sweep-once`.
 
 - `python main.py --once` remains a Codex-only full maintenance run.
-- `python main.py --dry-run --xai-error-sweep-once` lists and evaluates only
-  xAI rows and performs no DELETE request.
+- `python main.py --dry-run --xai-error-sweep-once` requires the xAI setting
+  to be enabled, then lists and evaluates only xAI rows without a DELETE
+  request.
 - `python main.py --xai-error-sweep-once` performs the scoped deletion only
   when the xAI setting is enabled.
 - Daemon mode continues to run the periodic metadata sweep. Once explicitly

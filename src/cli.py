@@ -32,6 +32,12 @@ def main() -> int:
     except SettingsError as exc:
         parser.exit(status=2, message=f"Configuration error: {exc}\n")
 
+    if args.xai_error_sweep_once and not settings.xai_permission_denied_delete_enabled:
+        parser.error(
+            "--xai-error-sweep-once requires "
+            "CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true"
+        )
+
     maintainer = CPACodexKeeper(settings=settings, dry_run=args.dry_run)
     if args.xai_error_sweep_once:
         result = maintainer.sweep_error_status_once(allowed_types={"xai"})

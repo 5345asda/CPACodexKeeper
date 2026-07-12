@@ -93,35 +93,29 @@ class CPAClientTests(unittest.TestCase):
                 self.assertNotIn("authorization", error)
                 client._request.assert_called_once_with("GET", "/v0/management/auth-files")
 
-    def test_list_auth_files_discards_structured_error_for_legacy_callers(self):
+    def test_list_auth_files_returns_empty_for_transport_error(self):
         client = CPAClient("https://example.com", "secret")
-        client.list_auth_files_with_error = Mock(return_value=([], "request_error"))
+        client._request = Mock(return_value=RequestResult(status_code=None, error="request failed"))
 
         files = client.list_auth_files()
 
         self.assertEqual(files, [])
-        client.list_auth_files_with_error.assert_called_once_with()
+        client._request.assert_called_once_with("GET", "/v0/management/auth-files")
 
-    def test_list_auth_files_returns_empty_for_invalid_file_entries(self):
+    def test_list_auth_files_keeps_valid_codex_when_xai_metadata_is_incomplete(self):
         client = CPAClient("https://example.com", "secret")
-        invalid_files_cases = (
-            ("mixed valid and empty dictionary", [{"name": "valid-xai.json", "type": "xai"}, {}]),
-            ("non-string name", [{"name": 1, "type": "xai"}]),
-            ("missing type", [{"name": "valid-xai.json"}]),
-            ("empty type", [{"name": "valid-xai.json", "type": ""}]),
+        expected_files = [
+            {"name": "valid-codex.json", "type": "codex"},
+            {"name": "", "type": "xai"},
+        ]
+        client._request = Mock(
+            return_value=RequestResult(status_code=200, json_data={"files": expected_files})
         )
 
-        for label, invalid_files in invalid_files_cases:
-            with self.subTest(label=label):
-                client._request = Mock(return_value=RequestResult(
-                    status_code=200,
-                    json_data={"files": invalid_files},
-                ))
+        files = client.list_auth_files()
 
-                files = client.list_auth_files()
-
-                self.assertEqual(files, [])
-                client._request.assert_called_once_with("GET", "/v0/management/auth-files")
+        self.assertEqual(files, expected_files)
+        client._request.assert_called_once_with("GET", "/v0/management/auth-files")
 
     def test_upload_auth_file_passes_name_via_params(self):
         client = CPAClient("https://example.com", "secret")

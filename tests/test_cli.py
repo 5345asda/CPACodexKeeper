@@ -104,6 +104,7 @@ class CLITests(unittest.TestCase):
         load_settings_mock.return_value = Settings(
             cpa_endpoint="https://example.com",
             cpa_token="secret",
+            xai_permission_denied_delete_enabled=True,
         )
         keeper = keeper_cls.return_value
         keeper.sweep_error_status_once.return_value = {"failed": 0}
@@ -124,6 +125,7 @@ class CLITests(unittest.TestCase):
         load_settings_mock.return_value = Settings(
             cpa_endpoint="https://example.com",
             cpa_token="secret",
+            xai_permission_denied_delete_enabled=True,
         )
         keeper = keeper_cls.return_value
         keeper.sweep_error_status_once.return_value = {"failed": 1}
@@ -144,6 +146,7 @@ class CLITests(unittest.TestCase):
         settings = Settings(
             cpa_endpoint="https://example.com",
             cpa_token="secret",
+            xai_permission_denied_delete_enabled=True,
         )
         load_settings_mock.return_value = settings
         keeper = keeper_cls.return_value
@@ -156,3 +159,38 @@ class CLITests(unittest.TestCase):
         keeper.sweep_error_status_once.assert_called_once_with(allowed_types={"xai"})
         keeper.run.assert_not_called()
         keeper.run_forever.assert_not_called()
+
+    @patch("src.cli.load_settings")
+    @patch("src.cli.CPACodexKeeper")
+    @patch("sys.argv", ["prog", "--xai-error-sweep-once"])
+    def test_xai_error_sweep_once_requires_enabled_delete_policy(
+        self, keeper_cls, load_settings_mock
+    ):
+        load_settings_mock.return_value = Settings(
+            cpa_endpoint="https://example.com",
+            cpa_token="secret",
+            xai_permission_denied_delete_enabled=False,
+        )
+        keeper_cls.return_value.sweep_error_status_once.return_value = {"failed": 0}
+
+        with self.assertRaises(SystemExit) as context:
+            main()
+
+        self.assertEqual(context.exception.code, 2)
+        keeper_cls.assert_not_called()
+
+    @patch("src.cli.load_settings")
+    @patch("src.cli.CPACodexKeeper")
+    @patch("sys.argv", ["prog", "--dry-run", "--xai-error-sweep-once"])
+    def test_xai_dry_run_requires_enabled_delete_policy(self, keeper_cls, load_settings_mock):
+        load_settings_mock.return_value = Settings(
+            cpa_endpoint="https://example.com",
+            cpa_token="secret",
+            xai_permission_denied_delete_enabled=False,
+        )
+
+        with self.assertRaises(SystemExit) as context:
+            main()
+
+        self.assertEqual(context.exception.code, 2)
+        keeper_cls.assert_not_called()

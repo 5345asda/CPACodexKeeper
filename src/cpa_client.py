@@ -82,8 +82,13 @@ class CPAClient:
         return files, None
 
     def list_auth_files(self) -> list[dict[str, Any]]:
-        files, _ = self.list_auth_files_with_error()
-        return files
+        result = self._request("GET", "/v0/management/auth-files")
+        if result.status_code != 200 or not isinstance(result.json_data, dict):
+            return []
+        files = result.json_data.get("files")
+        if not isinstance(files, list):
+            return []
+        return [file_info for file_info in files if isinstance(file_info, dict)]
 
     def get_auth_file(self, name: str) -> dict[str, Any] | None:
         result = self._request("GET", "/v0/management/auth-files/download", params={"name": name})

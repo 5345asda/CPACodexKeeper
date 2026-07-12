@@ -26,12 +26,15 @@ class MaintainerTests(unittest.TestCase):
             side_effect=lambda: (self.maintainer.cpa_client.list_auth_files(), None)
         )
 
-    def test_filter_tokens_keeps_only_codex_type(self):
+    def test_filter_tokens_keeps_only_valid_codex_files(self):
         tokens = [
             {"name": "a", "type": "codex"},
             {"name": "b", "type": "oauth"},
             {"name": "c", "type": "codex"},
             {"name": "d"},
+            None,
+            {"type": "codex"},
+            {"name": "", "type": "codex"},
         ]
         filtered = self.maintainer.filter_tokens(tokens)
         self.assertEqual([token["name"] for token in filtered], ["a", "c"])

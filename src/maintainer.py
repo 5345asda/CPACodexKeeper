@@ -69,7 +69,14 @@ class CPACodexKeeper:
         self.logger.token_header(idx, total, name)
 
     def filter_tokens(self, tokens):
-        return [token for token in tokens if token.get("type") == "codex"]
+        return [
+            token
+            for token in tokens
+            if isinstance(token, dict)
+            and token.get("type") == "codex"
+            and isinstance(token.get("name"), str)
+            and bool(token["name"].strip())
+        ]
 
     def get_token_list(self):
         return self.filter_tokens(self.cpa_client.list_auth_files())
