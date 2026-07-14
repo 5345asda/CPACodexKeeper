@@ -76,6 +76,23 @@ def _rows() -> tuple[dict[str, object], ...]:
             "status": "active",
             "status_message": '{"error":{"type":"usage_limit_reached"}}',
         },
+        {
+            "name": "xai-active-denied.json",
+            "type": "xai",
+            "disabled": False,
+            "status": "active",
+            "status_message": (
+                '{"code":"permission-denied",'
+                '"error":"Access to the chat endpoint is denied. Contact support."}'
+            ),
+        },
+        {
+            "name": "xai-active-empty.json",
+            "type": "xai",
+            "disabled": False,
+            "status": "active",
+            "status_message": "",
+        },
     )
 
 
@@ -100,12 +117,13 @@ class FastScanServiceTests(unittest.TestCase):
                 ("delete", "codex-revoked.json"),
                 ("delete", "xai-access.json"),
                 ("delete", "xai-chat.json"),
+                ("delete", "xai-active-denied.json"),
             ],
         )
         self.assertEqual(result.status, RunStatus.SUCCESS)
         self.assertEqual(
             [(report.provider_id, report.scanned, report.matched, report.applied) for report in result.reports],
-            [("codex", 2, 2, 2), ("xai", 2, 2, 2)],
+            [("codex", 2, 2, 2), ("xai", 3, 3, 3)],
         )
         self.assertEqual(
             result.handled_resource_names,
@@ -115,6 +133,7 @@ class FastScanServiceTests(unittest.TestCase):
                     "codex-revoked.json",
                     "xai-access.json",
                     "xai-chat.json",
+                    "xai-active-denied.json",
                 }
             ),
         )
@@ -133,7 +152,11 @@ class FastScanServiceTests(unittest.TestCase):
         self.assertEqual(cpa_api.list_calls, 1)
         self.assertEqual(
             cpa_api.calls,
-            [("delete", "xai-access.json"), ("delete", "xai-chat.json")],
+            [
+                ("delete", "xai-access.json"),
+                ("delete", "xai-chat.json"),
+                ("delete", "xai-active-denied.json"),
+            ],
         )
         self.assertEqual(result.reports[0].provider_id, "codex")
         self.assertEqual(result.reports[0].scanned, 0)
@@ -209,6 +232,8 @@ class FastScanServiceTests(unittest.TestCase):
                 "xai-access.json": 1,
                 "xai-chat.json": 1,
                 "codex-active.json": 0,
+                "xai-active-denied.json": 1,
+                "xai-active-empty.json": 0,
             },
         )
 

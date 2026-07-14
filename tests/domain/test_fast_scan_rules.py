@@ -81,9 +81,21 @@ class FastScanRuleTests(unittest.TestCase):
                 "error.message": "different error",
             },
         )
+        chat_endpoint_rule = select_rule(
+            rules,
+            {
+                "error.type": None,
+                "error.code": "permission-denied",
+                "error.message": "Access to the chat endpoint is denied. Contact support.",
+            },
+        )
 
         self.assertEqual(message_rule.id if message_rule else None, "access-denied-delete")
         self.assertEqual(code_rule.id if code_rule else None, "chat-permission-denied-delete")
+        self.assertEqual(
+            chat_endpoint_rule.id if chat_endpoint_rule else None,
+            "chat-endpoint-permission-denied-delete",
+        )
 
     def test_higher_priority_rule_wins_and_disabled_rule_is_ignored(self) -> None:
         data = tomllib.loads(CONFIG)
