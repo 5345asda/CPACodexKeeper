@@ -1,422 +1,75 @@
-# CPACodexKeeper
+# CPA Provider Keeper
 
 [![CI](https://github.com/5345asda/CPACodexKeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/5345asda/CPACodexKeeper/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 
-[中文](README.md) | [English](README.en.md)
+[中文](README.md)
 
-CPACodexKeeper is a Python tool for **inspecting and maintaining codex tokens stored in a CPA management system**.
+CPA Provider Keeper maintains existing auth files through a CPA management API. A single global list read feeds configurable provider fast-scan rules, while Codex uses a separate lifecycle inspection.
 
-It does not create tokens. Instead, it continuously maintains **existing codex tokens already stored in a CPA management API**.
+## Behavior
 
-## Core capabilities
+- `[fast_scan]` schedules one shared CPA list read for every enabled provider.
+- Fast scan considers only rows with `status = "error"` and normalizes upstream JSON into `error.type`, `error.code`, and `error.message`.
+- Rules live in `providers.<id>.fast_scan.rules`. They use `all` or `any`, match with `eq` or `contains`, and can only `disable` or `delete`.
+- Rules run in descending priority order. The first match executes immediately against CPA.
+- Codex inspection has fixed lifecycle behavior. Its TOML section contains only runtime parameters such as interval, workers, quota threshold, and refresh settings.
 
-- check whether a token is still valid
-- disable or re-enable tokens based on the actual quota windows returned by usage
-- optionally refresh disabled tokens that are close to expiry
-- support `.env` configuration, Docker, and GitHub Actions CI
+There is no `--apply`, plan, or dry-run mode. Disable a rule or provider before deploying a configuration that should not write to CPA. Logs use resource hashes and never include auth-file bodies, token values, raw resource names, or upstream error text.
 
-## Who this is for
-
-If you already have a CPA-style token management API and want to:
-
-- clean invalid tokens automatically
-- control token usage quota
-- re-enable tokens when quota recovers
-- enable auto-refresh for disabled near-expiry tokens when needed
-
-then this project is built for that workflow.
-
-## Quick start
+## Quick Start
 
 ```bash
 cp .env.example .env
-python main.py --once
+cp docs/reference/config.example.toml config.toml
+python -m pip install .
 ```
 
-See the sections below for full configuration and runtime details.
+Set connection values in `.env`:
 
----
-
-## 1. What problem this project solves
-
-In practice, codex tokens are not static assets. Over time, they may run into issues such as:
-
-- tokens becoming invalid but still remaining in the management system
-- usage quota being exhausted
-- tokens being manually disabled and never re-enabled when quota recovers
-- disabled tokens getting close to expiry and needing refresh only when refresh is explicitly allowed
-- team and non-team accounts returning different usage structures
-
-CPACodexKeeper automates those maintenance tasks so they do not need to be handled manually.
-
----
-
-## 2. Current maintenance flow
-
-Each inspection round follows this sequence:
-
-1. fetch the token list from the CPA management API
-2. keep only tokens where `type=codex`
-3. if list metadata shows `status=error` and the error type, code, and message all match the auto-delete rule, delete it first and skip detail download
-4. if list metadata shows `status=error` and the error type matches the auto-disable rule, disable it first and skip detail download
-5. fetch token details one by one
-6. read expiry information and remaining lifetime
-7. call the OpenAI usage endpoint
-8. delete the token if usage returns `401` or `402`, meaning the token is invalid or the workspace is deactivated
-9. if usage returns two quota windows, evaluate them by their actual meaning
-10. disable when either window reaches the threshold, and re-enable only when both drop below it
-11. if the token has **no `refresh_token`** and is already expired, delete it directly
-12. if the token has **no `refresh_token`** and the checked quota reaches the threshold, delete it directly
-13. if automatic refresh is explicitly enabled and the token is still disabled after quota handling and close to expiry, refresh it
-14. upload the refreshed token payload back to CPA
-
-This process is **round-based with intra-round concurrency**. One full round still completes before the next round starts, but multiple tokens can be inspected concurrently within the same round.
-
-Daemon mode also starts a lightweight error sweep. By default, every 60 seconds it reads only CPA list metadata for `codex` and `xai` entries. It does not download token details, call OpenAI usage, refresh, or re-enable tokens. By default it deletes only authentication-invalidated errors where `type=authentication_error`, `code=auth_unavailable`, and the message contains `invalidated`; it disables quota errors such as `type=usage_limit_reached`. This quickly handles frontend red-box errors without conflicting with the full maintenance loop.
-
-xAI chat-endpoint permission cleanup is disabled by default and requires `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true`. Deletion requires every one of these conditions:
-
-- list `type` is exactly `xai`
-- list `status` is exactly `error`
-- top-level `code` in `status_message` is exactly `permission-denied`
-- the top-level scalar `error` string in `status_message` contains `access to the chat endpoint is denied`, case-insensitively
-
-Both enabled and disabled exact-match xAI files are eligible. Missing fields, malformed JSON, a non-string `error`, or near matches do not delete.
-
----
-
-## 3. Supported quota logic
-
-The project supports both team and non-team usage responses.
-
-### Team mode
-
-When the usage response includes both windows:
-
-- `rate_limit.primary_window`: usually the primary quota window; logs label it from `limit_window_seconds` as `5h`, `Week`, or another appropriate name
-- `rate_limit.secondary_window`: usually the secondary quota window; logs also label it from `limit_window_seconds`
-
-In that case, the program will:
-
-- disable when either `primary_window.used_percent` or `secondary_window.used_percent` reaches the threshold
-- re-enable only when both windows are below the threshold
-- automatically send the `Chatgpt-Account-Id` header
-
-### Non-team or no weekly window
-
-If no weekly window exists:
-
-- the program falls back to `primary_window.used_percent`
-
-### Default threshold
-
-Default:
-
-- `CPA_QUOTA_THRESHOLD=100`
-
-That means:
-
-- disable only when the checked quota reaches 100%
-- re-enable when it drops below 100%
-- but if a token has no `refresh_token`, reaching the threshold deletes it instead of only disabling it
-
----
-
-## 4. Configuration
-
-The project now **uses `.env` only**.
-
-These legacy files are no longer used:
-
-- `config.json`
-- `config.example.json`
-
-First copy the template:
-
-```bash
-cp .env.example .env
+```ini
+CPA_ENDPOINT=https://cpa.example.internal
+CPA_TOKEN=your-management-token
+CPA_PROXY=
 ```
 
-Then edit `.env`.
-
-### Configuration fields
-
-- `CPA_ENDPOINT`: CPA management API base URL
-- `CPA_TOKEN`: CPA management token
-- `CPA_PROXY`: optional HTTP/HTTPS proxy
-- `CPA_INTERVAL`: daemon interval in seconds, default `1800`
-- `CPA_QUOTA_THRESHOLD`: disable threshold, default `100`
-- `CPA_EXPIRY_THRESHOLD_DAYS`: refresh threshold in days for disabled tokens, default `3`
-- `CPA_ENABLE_REFRESH`: whether automatic refresh for disabled tokens is enabled, default `true`
-- `CPA_ERROR_SWEEP_ENABLED`: whether daemon mode runs the lightweight error sweep, default `true`
-- `CPA_ERROR_SWEEP_INTERVAL`: error sweep interval in seconds, default `60`
-- `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED`: whether to enable strict xAI chat-endpoint permission cleanup, default `false`
-- `CPA_ERROR_DISABLE_TYPES`: comma-separated list-level error types that trigger auto-disable, default `usage_limit_reached`
-- `CPA_ERROR_DELETE_TYPES`: comma-separated list-level error types that trigger auto-delete, default `authentication_error`
-- `CPA_ERROR_DELETE_CODES`: comma-separated list-level error codes that trigger auto-delete, default `auth_unavailable`
-- `CPA_ERROR_DELETE_MESSAGE_KEYWORDS`: comma-separated message keywords that trigger auto-delete, default `invalidated`
-- `CPA_HTTP_TIMEOUT`: timeout for CPA API requests, default `30`
-- `CPA_USAGE_TIMEOUT`: timeout for OpenAI usage requests, default `15`
-- `CPA_MAX_RETRIES`: retry count for transient network / 5xx failures, default `2`
-- `CPA_WORKER_THREADS`: number of worker threads per inspection round, default `8`
-
-The `.env.example` file already includes bilingual comments for direct editing.
-
-Automatic refresh is enabled by default, but the keeper still refreshes only tokens that remain disabled after quota handling; enabled tokens are left to CPA's own auto-refresh logic. If you need to avoid competing with another writer rotating the same shared `refresh_token`, set it to `false` in `.env`.
-
-The error sweep is enabled by default. It applies delete rules before disable rules, and never enables or refreshes tokens. The default Codex delete rule requires error type, code, and message keyword matches so transient auth-pool unavailability is not deleted. The xAI rule is separate from those configurable Codex rules and remains disabled by default. The error sweep and the full maintenance round may run at the same time, but each token name is reserved before mutation so the two tasks do not write the same auth file concurrently; delete and status writes also go through the same serialized mutation path.
-
----
-
-## 5. Running the project
-
-### Requirements
-
-- Python 3.11+
-- dependency: `curl-cffi`
-
-Install dependencies:
+Validate local files and run one maintenance cycle:
 
 ```bash
-pip install -r requirements.txt
+cpa-keeper config validate --config config.toml --env-file .env
+cpa-keeper doctor --config config.toml --env-file .env
+cpa-keeper run --config config.toml --env-file .env
 ```
 
-### Run once
+Use `scan` for one fast-scan pass and `daemon` for recurring maintenance.
 
-Useful for manual inspection, debugging, or external schedulers:
+## Commands
 
-```bash
-cp .env.example .env
-python main.py --once
-```
+| Command | Purpose |
+| --- | --- |
+| `cpa-keeper config validate` | Validate TOML and connection inputs without calling CPA. |
+| `cpa-keeper doctor` | Print validated runtime settings. |
+| `cpa-keeper scan` | Run one global fast scan. |
+| `cpa-keeper run` | Run one global fast scan and enabled inspections. |
+| `cpa-keeper daemon` | Seed one cycle, then schedule recurring work. |
 
-### Run in daemon mode
+Every runtime command accepts `--config PATH` and `--env-file PATH`; defaults are `./config.toml` and `./.env`.
 
-Useful for continuous maintenance:
-
-```bash
-python main.py
-```
-
-### Dry run
-
-This will not actually delete, disable, enable, or upload updates:
+## Docker
 
 ```bash
-python main.py --once --dry-run
-```
-
-### xAI `permission-denied` cleanup
-
-Full `--once` maintenance always processes only `type=codex`. `--xai-error-sweep-once` reads only xAI list metadata; it does not download auth-file details or call OpenAI usage.
-
-First set `CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED=true` in `.env`, then run the non-mutating preflight:
-
-```bash
-python main.py --dry-run --xai-error-sweep-once
-```
-
-After confirming the preflight candidates, run the scoped deletion with the same setting:
-
-```bash
-python main.py --xai-error-sweep-once
-```
-
-The command exits with `1` when the sweep reports failures. Zero candidates is a successful no-op with exit code `0`. `--daemon`, `--once`, and `--xai-error-sweep-once` are mutually exclusive, and the full option name is required: abbreviations such as `--xai` are rejected.
-
----
-
-## 6. Docker deployment
-
-The project supports Docker, and configuration still comes only from `.env` / environment variables.
-
-### Build the image
-
-```bash
-docker build -t cpacodexkeeper .
-```
-
-### Run directly
-
-```bash
-docker run -d \
-  --name cpacodexkeeper \
-  -e CPA_ENDPOINT=https://your-cpa-endpoint \
-  -e CPA_TOKEN=your-management-token \
-  -e CPA_INTERVAL=1800 \
-  cpacodexkeeper
-```
-
-### Use Compose
-
-Copy the template first:
-
-```bash
-cp .env.example .env
-```
-
-Then edit `.env` and start:
-
-```bash
+docker network inspect shared
+docker compose config --quiet
 docker compose up -d --build
+docker compose logs --tail=100 cpacodexkeeper
 ```
 
----
+Compose injects `CPA_ENDPOINT`, `CPA_TOKEN`, and optional `CPA_PROXY` from its environment and mounts `config.toml` read-only.
 
-## 7. Output behavior
+## Documentation
 
-For each token, the tool logs details such as:
-
-- multiple tokens may be inspected concurrently within a round
-- each token log is buffered and emitted as one block so console output does not interleave across threads
-
-- token name
-- email
-- current disabled state
-- expiry time
-- remaining lifetime
-- usage check result
-- actual quota window information
-- whether the token was deleted, disabled, enabled, or refreshed
-
-At the end of each round, it prints a summary including:
-
-- total
-- alive
-- dead (deleted)
-- disabled
-- enabled
-- refreshed
-- skipped
-- network errors
-
----
-
-## 8. Robustness features
-
-The current version already includes several protections:
-
-- strict `.env` validation at startup
-- range validation for numeric fields
-- separate timeouts for CPA API and usage API
-- limited retries for transient network / 5xx failures
-- safe fallback when `secondary_window = null`
-- one bad token does not break the whole round
-- daemon mode keeps running even if one round fails
-
----
-
-## 9. Developer helpers
-
-The project includes a `justfile` for common commands.
-
-If you use `just`, you can run:
-
-```bash
-just install
-just test
-just run-once
-just dry-run
-just daemon
-just docker-build
-just docker-up
-just docker-down
-```
-
----
-
-## 10. Tests and CI
-
-### Local tests
-
-```bash
-python -m unittest discover -s tests
-```
-
-Or:
-
-```bash
-just test
-```
-
-### GitHub Actions
-
-The repository includes a CI workflow that:
-
-- runs unit tests automatically
-- verifies that the Docker image builds successfully
-
-Workflow file:
-
-```text
-.github/workflows/ci.yml
-```
-
----
-
-## 11. Project structure
-
-```text
-CPACodexKeeper/
-├─ src/
-│  ├─ cli.py
-│  ├─ cpa_client.py
-│  ├─ logging_utils.py
-│  ├─ maintainer.py
-│  ├─ models.py
-│  ├─ openai_client.py
-│  ├─ settings.py
-│  └─ utils.py
-├─ tests/
-├─ .env.example
-├─ docker-compose.yml
-├─ Dockerfile
-├─ justfile
-├─ main.py
-├─ README.md
-└─ README.en.md
-```
-
----
-
-## 12. Troubleshooting
-
-### Configuration error at startup
-
-Usually caused by missing `.env` fields or invalid values.
-
-Check:
-
-- `CPA_ENDPOINT`
-- `CPA_TOKEN`
-- whether numeric fields are valid integers
-
-### usage returns `401`
-
-The token is invalid. Under the current logic, it will be deleted.
-
-### usage returns `402`
-
-This usually means the workspace is deactivated or unavailable. Under the current logic, it will also be deleted.
-
-### `secondary_window = null`
-
-No weekly window is available. The tool automatically falls back to the primary window.
-
-### Docker cannot build locally
-
-Make sure Docker CLI is installed and available in your environment.
-
----
-
-## 13. Intended usage
-
-This project is meant for **authorized internal maintenance scenarios**, such as:
-
-- private CPA management systems
-- internal token-pool maintenance
-- authorized inspection and cleanup jobs
-
-Real credentials should never be committed to version control. Keep `.env` local or inject it securely in your deployment environment.
+- [Configuration](docs/configuration.md)
+- [Commands](docs/commands.md)
+- [Architecture](docs/architecture.md)
+- [Operations](docs/operations.md)
+- [Provider Extension](docs/providers.md)
+- [Configuration Example](docs/reference/config.example.toml)
