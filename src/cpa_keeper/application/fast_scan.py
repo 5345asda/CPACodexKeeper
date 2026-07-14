@@ -152,12 +152,19 @@ class FastScanService:
             item = _metadata(row, provider_id)
             if item is not None:
                 metadata.append(item)
-            if not provider.fast_scan.enabled or item is None or item.status != "error":
+            if not provider.fast_scan.enabled or item is None:
+                continue
+
+            values = normalize_error(row)
+            has_error_metadata = any(value is not None for value in values.values())
+            if item.status != "error" and not (
+                provider_id == "xai" and has_error_metadata
+            ):
                 continue
 
             provider_counts = counts[provider_id]
             provider_counts["scanned"] += 1
-            rule = select_rule(provider.fast_scan.rules, normalize_error(row))
+            rule = select_rule(provider.fast_scan.rules, values)
             if rule is None:
                 continue
             provider_counts["matched"] += 1
