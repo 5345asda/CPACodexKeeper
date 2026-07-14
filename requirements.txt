@@ -1,1 +1,2 @@
-curl-cffi>=0.7.0
+# Compatibility bootstrap. Dependency declarations live in pyproject.toml.
+.

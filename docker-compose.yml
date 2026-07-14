@@ -3,27 +3,21 @@ services:
     build: .
     container_name: cpacodexkeeper
     restart: unless-stopped
+    command: ["daemon", "--config", "/app/config.toml"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      CPA_ENDPOINT: ${CPA_ENDPOINT}
-      CPA_TOKEN: ${CPA_TOKEN}
+      CPA_ENDPOINT: ${CPA_ENDPOINT:?CPA_ENDPOINT must be set in .env or the shell}
+      CPA_TOKEN: ${CPA_TOKEN:?CPA_TOKEN must be set in .env or the shell}
       CPA_PROXY: ${CPA_PROXY:-}
-      CPA_INTERVAL: ${CPA_INTERVAL:-1800}
-      CPA_QUOTA_THRESHOLD: ${CPA_QUOTA_THRESHOLD:-100}
-      CPA_EXPIRY_THRESHOLD_DAYS: ${CPA_EXPIRY_THRESHOLD_DAYS:-3}
-      CPA_ENABLE_REFRESH: ${CPA_ENABLE_REFRESH:-true}
-      CPA_ERROR_SWEEP_ENABLED: ${CPA_ERROR_SWEEP_ENABLED:-true}
-      CPA_ERROR_SWEEP_INTERVAL: ${CPA_ERROR_SWEEP_INTERVAL:-60}
-      CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED: ${CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED:-false}
-      CPA_ERROR_DISABLE_TYPES: ${CPA_ERROR_DISABLE_TYPES:-usage_limit_reached}
-      CPA_ERROR_DELETE_TYPES: ${CPA_ERROR_DELETE_TYPES:-authentication_error}
-      CPA_ERROR_DELETE_CODES: ${CPA_ERROR_DELETE_CODES:-auth_unavailable}
-      CPA_ERROR_DELETE_MESSAGE_KEYWORDS: ${CPA_ERROR_DELETE_MESSAGE_KEYWORDS:-invalidated}
-      CPA_HTTP_TIMEOUT: ${CPA_HTTP_TIMEOUT:-30}
-      CPA_USAGE_TIMEOUT: ${CPA_USAGE_TIMEOUT:-15}
-      CPA_MAX_RETRIES: ${CPA_MAX_RETRIES:-2}
-      CPA_WORKER_THREADS: ${CPA_WORKER_THREADS:-8}
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+    healthcheck:
+      test: ["CMD", "cpa-keeper", "doctor", "--config", "/app/config.toml"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - shared
 

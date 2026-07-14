@@ -1,22 +1,28 @@
 set shell := ["bash", "-cu"]
 
 install:
-    python -m pip install -r requirements.txt
+    python -m pip install .
 
 test:
     python -m unittest discover -s tests
 
-run-once:
-    python main.py --once
+lint:
+    ruff check src/cpa_keeper tests
 
-dry-run:
-    python main.py --once --dry-run
+config-validate:
+    cpa-keeper config validate --config config.toml --env-file .env
+
+scan:
+    cpa-keeper scan --config config.toml --env-file .env
+
+run:
+    cpa-keeper run --config config.toml --env-file .env
 
 daemon:
-    python main.py
+    cpa-keeper daemon --config config.toml --env-file .env
 
 docker-build:
-    docker build -t cpacodexkeeper .
+    docker build -t cpa-provider-keeper .
 
 docker-up:
     docker compose up -d --build

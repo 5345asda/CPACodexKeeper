@@ -6,22 +6,16 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class DockerComposeTests(unittest.TestCase):
-    def test_compose_exposes_runtime_toggles(self):
+    def test_compose_mounts_v1_behavior_file_and_injects_only_connection_secrets(self):
         compose_text = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
-        self.assertIn("CPA_ENABLE_REFRESH:", compose_text)
-        self.assertIn("CPA_ENABLE_REFRESH: ${CPA_ENABLE_REFRESH:-true}", compose_text)
-        self.assertIn("CPA_WORKER_THREADS:", compose_text)
-        self.assertIn("CPA_ERROR_SWEEP_ENABLED: ${CPA_ERROR_SWEEP_ENABLED:-true}", compose_text)
-        self.assertIn("CPA_ERROR_SWEEP_INTERVAL: ${CPA_ERROR_SWEEP_INTERVAL:-60}", compose_text)
-        self.assertIn(
-            "CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED: ${CPA_XAI_PERMISSION_DENIED_DELETE_ENABLED:-false}",
-            compose_text,
-        )
-        self.assertIn("CPA_ERROR_DISABLE_TYPES: ${CPA_ERROR_DISABLE_TYPES:-usage_limit_reached}", compose_text)
-        self.assertIn("CPA_ERROR_DELETE_TYPES: ${CPA_ERROR_DELETE_TYPES:-authentication_error}", compose_text)
-        self.assertIn("CPA_ERROR_DELETE_CODES: ${CPA_ERROR_DELETE_CODES:-auth_unavailable}", compose_text)
-        self.assertIn("CPA_ERROR_DELETE_MESSAGE_KEYWORDS: ${CPA_ERROR_DELETE_MESSAGE_KEYWORDS:-invalidated}", compose_text)
+        self.assertIn("./config.toml:/app/config.toml:ro", compose_text)
+        self.assertIn('command: ["daemon", "--config", "/app/config.toml"]', compose_text)
+        self.assertIn("CPA_ENDPOINT:", compose_text)
+        self.assertIn("CPA_TOKEN:", compose_text)
+        self.assertIn("CPA_PROXY:", compose_text)
+        self.assertNotIn("CPA_INTERVAL", compose_text)
+        self.assertNotIn("CPA_XAI_", compose_text)
 
     def test_compose_preserves_live_network_topology(self):
         compose_text = pathlib.Path("docker-compose.yml").read_text(encoding="utf-8")
@@ -29,3 +23,14 @@ class DockerComposeTests(unittest.TestCase):
         self.assertIn("networks:", compose_text)
         self.assertIn("shared:", compose_text)
         self.assertIn("external: true", compose_text)
+
+
+class DockerfileTests(unittest.TestCase):
+    def test_runtime_image_contains_only_v1_package_and_cli_entrypoint(self):
+        dockerfile_text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("COPY src/cpa_keeper ./src/cpa_keeper", dockerfile_text)
+        self.assertIn('ENTRYPOINT ["cpa-keeper"]', dockerfile_text)
+        self.assertIn('CMD ["daemon"]', dockerfile_text)
+        self.assertNotIn("COPY . .", dockerfile_text)
+        self.assertNotIn('"python", "main.py"', dockerfile_text)

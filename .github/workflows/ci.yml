@@ -4,9 +4,16 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,24 +21,56 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install package and quality tools
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install "setuptools>=68" build ruff wheel
+          python -m pip install .
 
-      - name: Run unit tests
+      - name: Lint
+        run: ruff check src/cpa_keeper tests
+
+      - name: Run unit and contract tests
         run: python -m unittest discover -s tests
 
-  docker-build:
+      - name: Compile v1 runtime
+        run: python -m compileall -q src/cpa_keeper tests
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: CLI smoke test
+        run: |
+          cp docs/reference/config.example.toml config.toml
+          printf 'CPA_ENDPOINT=https://cpa.example.invalid\nCPA_TOKEN=ci-management-token\nCPA_PROXY=\n' > .env
+          cpa-keeper --help
+          cpa-keeper --version
+          cpa-keeper config validate --config config.toml --env-file .env
+          cpa-keeper doctor --config config.toml --env-file .env
+
+  docker:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Prepare v1 Docker configuration
+        run: |
+          cp docs/reference/config.example.toml config.toml
+          printf 'CPA_ENDPOINT=https://cpa.example.invalid\nCPA_TOKEN=ci-management-token\nCPA_PROXY=\n' > .env
 
-      - name: Build Docker image
-        run: docker build -t cpacodexkeeper:ci .
+      - name: Validate Compose semantics
+        run: docker compose config --quiet
+
+      - name: Build v1 runtime image
+        run: docker build -t cpa-provider-keeper:ci .
+
+      - name: Run container doctor smoke test
+        run: |
+          docker run --rm \
+            -e CPA_ENDPOINT=https://cpa.example.invalid \
+            -e CPA_TOKEN=ci-management-token \
+            -v "$PWD/config.toml:/app/config.toml:ro" \
+            cpa-provider-keeper:ci doctor --config /app/config.toml

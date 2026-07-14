@@ -1,0 +1,72 @@
+# Connection secrets belong in .env or process environment.
+
+[control_plane]
+timeout_seconds = 30
+max_retries = 2
+
+# One CPA auth-file list read serves every provider fast scan.
+[fast_scan]
+interval_seconds = 60
+
+[providers.codex]
+enabled = true
+
+[providers.codex.fast_scan]
+enabled = true
+
+[[providers.codex.fast_scan.rules]]
+id = "usage-limit-disable"
+enabled = true
+action = "disable"
+priority = 60
+when = { all = [
+  { field = "error.type", op = "eq", value = "usage_limit_reached" },
+] }
+
+[[providers.codex.fast_scan.rules]]
+id = "invalidated-auth-delete"
+enabled = true
+action = "delete"
+priority = 100
+when = { all = [
+  { field = "error.type", op = "eq", value = "authentication_error" },
+  { field = "error.code", op = "eq", value = "auth_unavailable" },
+  { any = [
+    { field = "error.message", op = "contains", value = "invalidated", ignore_case = true },
+    { field = "error.message", op = "contains", value = "revoked", ignore_case = true },
+  ] },
+] }
+
+# Inspection has fixed Codex lifecycle behavior. It has no rule DSL.
+[providers.codex.inspection]
+enabled = true
+interval_seconds = 1800
+workers = 8
+usage_timeout_seconds = 15
+quota_threshold_percent = 100
+refresh_enabled = true
+refresh_before_expiry_days = 3
+
+[providers.xai]
+enabled = true
+
+[providers.xai.fast_scan]
+enabled = true
+
+[[providers.xai.fast_scan.rules]]
+id = "access-denied-delete"
+enabled = true
+action = "delete"
+priority = 100
+when = { all = [
+  { field = "error.message", op = "contains", value = "access denied", ignore_case = true },
+] }
+
+[[providers.xai.fast_scan.rules]]
+id = "chat-permission-denied-delete"
+enabled = true
+action = "delete"
+priority = 100
+when = { all = [
+  { field = "error.code", op = "eq", value = "chat-permission-denied" },
+] }

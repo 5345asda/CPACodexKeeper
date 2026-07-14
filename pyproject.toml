@@ -3,32 +3,36 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cpacodexkeeper"
-version = "0.1.0"
-description = "Maintain type=codex tokens from a CPA management API"
+name = "cpa-provider-keeper"
+version = "1.0.0rc1"
+description = "Provider-first maintenance for CPA management APIs"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
 dependencies = [
   "curl-cffi>=0.7.0",
+  "APScheduler>=3.11.0",
+  "pydantic>=2.12.0",
+  "python-dotenv>=1.0.0",
 ]
 authors = [
   { name = "Tao" }
 ]
-keywords = ["cpa", "codex", "token", "maintenance", "daemon"]
+keywords = ["cpa", "provider", "maintenance", "daemon"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
 
 [project.scripts]
-cpacodexkeeper = "src.cli:main"
+cpa-keeper = "cpa_keeper.cli.commands:main"
 
 [tool.setuptools]
 include-package-data = true
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*"]
+where = ["src"]
+include = ["cpa_keeper*"]
