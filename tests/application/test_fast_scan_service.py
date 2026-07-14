@@ -81,7 +81,10 @@ def _rows() -> tuple[dict[str, object], ...]:
             "type": "xai",
             "disabled": False,
             "status": "active",
-            "status_message": '{"code":"chat-permission-denied","error":"unused"}',
+            "status_message": (
+                '{"code":"permission-denied",'
+                '"error":"Access to the chat endpoint is denied. Contact support."}'
+            ),
         },
         {
             "name": "xai-active-empty.json",

@@ -10,6 +10,6 @@
 4. 运行 `cpa-keeper config validate`。
 5. 先关闭规则部署，确认列表类型和日志，再开启规则。
 
-示例 xAI 规则已在 [配置样例](reference/config.example.toml) 中提供：`access-denied-delete` 和 `chat-permission-denied-delete`。
+示例 xAI 规则已在 [配置样例](reference/config.example.toml) 中提供：`access-denied-delete`、`chat-permission-denied-delete` 和精确匹配真实 CPA 错误的 `chat-endpoint-permission-denied-delete`。
 
 Codex 目前是唯一支持深度巡检的 provider。添加另一个深度巡检 provider 时，需要扩展配置校验、实现详情解析和生命周期行为，并在 CLI 中构造相应巡检服务；快扫配置模型无需变化。

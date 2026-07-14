@@ -70,3 +70,13 @@ priority = 100
 when = { all = [
   { field = "error.code", op = "eq", value = "chat-permission-denied" },
 ] }
+
+[[providers.xai.fast_scan.rules]]
+id = "chat-endpoint-permission-denied-delete"
+enabled = true
+action = "delete"
+priority = 110
+when = { all = [
+  { field = "error.code", op = "eq", value = "permission-denied" },
+  { field = "error.message", op = "contains", value = "access to the chat endpoint is denied", ignore_case = true },
+] }
