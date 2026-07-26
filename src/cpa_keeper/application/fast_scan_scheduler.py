@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
+from collections.abc import Callable
 from threading import Lock
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -15,7 +15,6 @@ from cpa_keeper.application.results import (
     RunStatus,
 )
 from cpa_keeper.config.fast_scan import RuntimeConfig
-
 
 LOGGER = logging.getLogger(__name__)
 

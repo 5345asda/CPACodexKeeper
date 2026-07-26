@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from cpa_keeper.application.inspection_service import CodexInspectionService
 from cpa_keeper.application.mutation_coordinator import AuthFileMutationCoordinator

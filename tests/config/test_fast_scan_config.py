@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tomllib
 import unittest
+from pathlib import Path
 
 from cpa_keeper.config.fast_scan import ConfigError, parse_config_data
-
 
 CONFIG = """
 [fast_scan]

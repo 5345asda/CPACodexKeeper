@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from cpa_keeper.infrastructure.http import HttpResponse
 from cpa_keeper.infrastructure.cpa_api import CpaApi
+from cpa_keeper.infrastructure.http import HttpResponse
 
 
 class FakeTransport:

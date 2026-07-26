@@ -3,9 +3,10 @@ from __future__ import annotations
 import tomllib
 import unittest
 
+from config.test_fast_scan_config import CONFIG
+
 from cpa_keeper.application.fast_scan import normalize_error, select_rule
 from cpa_keeper.config.fast_scan import parse_config_data
-from config.test_fast_scan_config import CONFIG
 
 
 class FastScanRuleTests(unittest.TestCase):

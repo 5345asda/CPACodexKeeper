@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-import logging
-import time
 
 from cpa_keeper.config.fast_scan import InspectionConfig
 from cpa_keeper.domain.auth_files import AuthFileMetadata
@@ -24,7 +24,6 @@ from cpa_keeper.providers.codex.refresher import CodexRefresher
 
 from .mutation_coordinator import AuthFileMutationCoordinator
 from .results import InspectionResult, RunStatus
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -107,7 +106,9 @@ class CodexInspectionService:
             mutation = self._mutation_coordinator.execute_inspection(
                 item.name,
                 expected_epochs[item.name],
-                lambda: self._executor.execute(decision, refresh_callback=evaluation.refresh_callback),
+                lambda decision=decision, callback=evaluation.refresh_callback: (
+                    self._executor.execute(decision, refresh_callback=callback)
+                ),
             )
             if mutation is None:
                 counts["skipped"] += 1

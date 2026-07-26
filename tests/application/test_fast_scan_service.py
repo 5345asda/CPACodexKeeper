@@ -3,12 +3,13 @@ from __future__ import annotations
 import tomllib
 import unittest
 
+from config.test_fast_scan_config import CONFIG
+
 from cpa_keeper.application.fast_scan import FastScanService
 from cpa_keeper.application.mutation_coordinator import AuthFileMutationCoordinator
 from cpa_keeper.application.results import RunStatus
 from cpa_keeper.config.fast_scan import parse_config_data
 from cpa_keeper.infrastructure.cpa_api import CpaListResult, CpaOperationResult
-from config.test_fast_scan_config import CONFIG
 
 
 class FakeCpaApi:

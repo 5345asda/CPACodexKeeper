@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
-from cpa_keeper.config.loader import load_runtime_config
 from config.test_fast_scan_config import CONFIG
+from cpa_keeper.config.loader import load_runtime_config
 
 
 class FastScanLoaderTests(unittest.TestCase):

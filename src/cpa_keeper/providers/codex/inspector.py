@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol
 
@@ -52,7 +52,7 @@ def _parse_expiry_state(
     except ValueError:
         return ExpiryState.UNKNOWN
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     remaining_seconds = parsed.timestamp() - now_epoch_seconds
     if remaining_seconds <= 0:
         return ExpiryState.EXPIRED

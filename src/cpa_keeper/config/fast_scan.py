@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import re
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -21,15 +21,15 @@ class RuleCondition(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    all: list["RuleCondition"] | None = None
-    any: list["RuleCondition"] | None = None
+    all: list[RuleCondition] | None = None
+    any: list[RuleCondition] | None = None
     field: Literal["error.type", "error.code", "error.message"] | None = None
     op: Literal["eq", "contains"] | None = None
     value: str | None = None
     ignore_case: bool = False
 
     @model_validator(mode="after")
-    def validate_shape(self) -> "RuleCondition":
+    def validate_shape(self) -> RuleCondition:
         groups = (self.all is not None) + (self.any is not None) + (self.field is not None)
         if groups != 1:
             raise ValueError("condition needs exactly one of all, any, or field")
@@ -135,7 +135,7 @@ class RuntimeConfig(BaseModel):
         return providers
 
     @model_validator(mode="after")
-    def codex_owns_inspection(self) -> "RuntimeConfig":
+    def codex_owns_inspection(self) -> RuntimeConfig:
         if any(
             provider_id != "codex" and provider.inspection is not None
             for provider_id, provider in self.providers.items()

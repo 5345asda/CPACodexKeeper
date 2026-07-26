@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
-from io import StringIO
 import logging
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from unittest.mock import patch
 
 from cpa_keeper.application.results import FastScanResult, MaintenanceResult, RunStatus

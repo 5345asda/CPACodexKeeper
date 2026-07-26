@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import logging
-from pathlib import Path
 import sys
 import time
+from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cpa_keeper import __version__

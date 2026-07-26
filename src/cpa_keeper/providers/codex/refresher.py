@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from cpa_keeper.domain.auth_files import AuthFileMetadata
-
 
 DEFAULT_EXPIRES_IN_SECONDS = 864000
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -35,7 +34,7 @@ class CodexRefresher:
         self,
         refresh_api: RefreshApi,
         *,
-        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._refresh_api = refresh_api
         self._now = now
@@ -61,7 +60,7 @@ class CodexRefresher:
         expires_in = refreshed.get("expires_in")
         if type(expires_in) is not int or expires_in <= 0:
             expires_in = DEFAULT_EXPIRES_IN_SECONDS
-        now = self._now().astimezone(timezone.utc)
+        now = self._now().astimezone(UTC)
         replacement = dict(auth_file)
         replacement.update(
             {

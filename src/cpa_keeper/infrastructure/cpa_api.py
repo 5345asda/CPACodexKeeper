@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-import time
 
 from .http import CurlCffiHttpTransport, HttpResponse, HttpTransport, request_with_retry
 

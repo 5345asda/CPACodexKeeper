@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import json
 import logging
 import time
+from collections.abc import Mapping, Sequence
 
 from cpa_keeper.application.mutation_coordinator import AuthFileMutationCoordinator
 from cpa_keeper.application.results import FastScanResult, RunStatus
@@ -14,7 +14,6 @@ from cpa_keeper.domain.auth_files import AuthFileMetadata
 from cpa_keeper.domain.identifiers import resource_hash
 from cpa_keeper.domain.reports import ProviderRunReport, RunPhase
 from cpa_keeper.infrastructure.cpa_api import CpaApi
-
 
 LOGGER = logging.getLogger(__name__)
 

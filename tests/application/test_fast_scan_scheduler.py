@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import tomllib
 import threading
+import tomllib
 import unittest
+
+from config.test_fast_scan_config import CONFIG
 
 from cpa_keeper.application.fast_scan_scheduler import FastScanScheduler
 from cpa_keeper.application.results import FastScanResult, InspectionResult, MaintenanceResult, RunStatus
 from cpa_keeper.config.fast_scan import parse_config_data
 from cpa_keeper.domain.reports import ProviderRunReport, RunPhase
-from config.test_fast_scan_config import CONFIG
 
 
 class FakeFastScan:
