@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.application.inspection_service import CodexInspectionService
 from cpa_keeper.application.mutation_coordinator import AuthFileMutationCoordinator
@@ -169,8 +164,8 @@ class CodexInspectionServiceTests(unittest.TestCase):
         self.assertNotIn("delete.json", output)
         report = result.reports[0]
         self.assertEqual(
-            (report.provider_id, report.scanned, report.matched, report.planned, report.applied, report.skipped),
-            ("codex", 2, 1, 1, 1, 1),
+            (report.provider_id, report.scanned, report.matched, report.applied, report.skipped),
+            ("codex", 2, 1, 1, 1),
         )
 
     def test_failed_detail_is_counted_and_logs_only_a_hash(self) -> None:
@@ -257,6 +252,3 @@ class CodexInspectionServiceTests(unittest.TestCase):
         )
         self.assertEqual(result.reports[0].applied, 1)
 
-
-if __name__ == "__main__":
-    unittest.main()

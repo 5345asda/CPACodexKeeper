@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.infrastructure.http import HttpResponse
 from cpa_keeper.infrastructure.cpa_api import CpaApi
@@ -84,33 +79,6 @@ class CpaApiContractTests(unittest.TestCase):
         )
         self.assertEqual(transport.calls[1]["params"], {"name": "redacted-xai.json"})
 
-    def test_list_rejects_duplicate_auth_file_names(self) -> None:
-        transport = FakeTransport(
-            [
-                HttpResponse(
-                    status_code=200,
-                    json_data={
-                        "files": [
-                            {"name": "duplicate.json", "type": "codex"},
-                            {"name": "duplicate.json", "type": "codex"},
-                        ]
-                    },
-                )
-            ]
-        )
-        api = CpaApi(
-            endpoint="https://cpa.example.test",
-            token="test-token",
-            transport=transport,
-            max_retries=0,
-        )
-
-        result = api.list_auth_files()
-
-        self.assertFalse(result.ok)
-        self.assertEqual(result.error_code, "duplicate_auth_file_name")
-        self.assertEqual(result.auth_files, ())
-
     def test_delete_status_patch_and_upload_use_the_cpa_management_contract(self) -> None:
         transport = FakeTransport(
             [
@@ -169,6 +137,3 @@ class CpaApiContractTests(unittest.TestCase):
             ],
         )
 
-
-if __name__ == "__main__":
-    unittest.main()

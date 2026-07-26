@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 import tempfile
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.config.loader import load_runtime_config
 from config.test_fast_scan_config import CONFIG
@@ -59,6 +55,3 @@ class FastScanLoaderTests(unittest.TestCase):
 
         self.assertIsNone(runtime.connection.proxy)
 
-
-if __name__ == "__main__":
-    unittest.main()

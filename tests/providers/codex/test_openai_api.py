@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from cpa_keeper.infrastructure.http import HttpResponse
 from cpa_keeper.providers.codex.openai_api import OpenAiApi
@@ -49,6 +44,3 @@ class OpenAiApiContractTests(unittest.TestCase):
         self.assertEqual(sleeps, [1])
         self.assertNotIn("temporary-body", repr(response))
 
-
-if __name__ == "__main__":
-    unittest.main()

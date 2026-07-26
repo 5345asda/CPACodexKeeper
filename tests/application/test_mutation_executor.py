@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.providers.codex.lifecycle_policies import LifecycleAction, LifecycleDecision
 from cpa_keeper.providers.codex.mutation import CodexMutationExecutor
@@ -86,6 +81,3 @@ class CodexMutationExecutorTests(unittest.TestCase):
             ],
         )
 
-
-if __name__ == "__main__":
-    unittest.main()

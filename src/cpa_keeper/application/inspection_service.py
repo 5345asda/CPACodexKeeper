@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-import hashlib
 import logging
 import time
 
 from cpa_keeper.config.fast_scan import InspectionConfig
 from cpa_keeper.domain.auth_files import AuthFileMetadata
+from cpa_keeper.domain.identifiers import resource_hash
 from cpa_keeper.domain.reports import ProviderRunReport, RunPhase
+from cpa_keeper.infrastructure.cpa_api import CpaApi
 from cpa_keeper.providers.codex.inspector import CodexInspector
 from cpa_keeper.providers.codex.lifecycle_policies import (
     CodexInspectionPolicyEvaluator,
@@ -21,15 +22,11 @@ from cpa_keeper.providers.codex.mutation import CodexMutationExecutor, RefreshCa
 from cpa_keeper.providers.codex.openai_api import OpenAiApi
 from cpa_keeper.providers.codex.refresher import CodexRefresher
 
-from .results import InspectionResult, RunStatus
 from .mutation_coordinator import AuthFileMutationCoordinator
+from .results import InspectionResult, RunStatus
 
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _resource_hash(name: str) -> str:
-    return hashlib.sha256(name.encode()).hexdigest()[:12]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +41,7 @@ class CodexInspectionService:
 
     def __init__(
         self,
-        cpa_api: object,
+        cpa_api: CpaApi,
         *,
         config: InspectionConfig,
         inspector: object,
@@ -63,11 +60,10 @@ class CodexInspectionService:
     def _evaluate(self, metadata: AuthFileMetadata) -> _Evaluation:
         detail = self._cpa_api.get_auth_file(metadata.name)
         if not detail.ok:
-            error_code = detail.error_code or "cpa_detail_failed"
             LOGGER.warning(
                 "event=inspection_detail provider=codex outcome=failed resource_hash=%s error_code=%s",
-                _resource_hash(metadata.name),
-                error_code,
+                resource_hash(metadata.name),
+                detail.error_code or "cpa_detail_failed",
             )
             return _Evaluation(failed=True)
 
@@ -82,7 +78,7 @@ class CodexInspectionService:
             return _Evaluation()
         return _Evaluation(
             decision=decision,
-            refresh_callback=lambda decision: self._refresher.refresh(facts.metadata, detail.payload),
+            refresh_callback=lambda _decision: self._refresher.refresh(facts.metadata, detail.payload),
         )
 
     def inspect(
@@ -93,14 +89,7 @@ class CodexInspectionService:
     ) -> InspectionResult:
         """Download and inspect Codex credential details with configured concurrency."""
         metadata = tuple(metadata_items)
-        counts = {
-            "scanned": len(metadata),
-            "matched": 0,
-            "planned": 0,
-            "applied": 0,
-            "skipped": 0,
-            "failed": 0,
-        }
+        counts = {"scanned": len(metadata), "matched": 0, "applied": 0, "skipped": 0, "failed": 0}
         with ThreadPoolExecutor(max_workers=self._config.workers) as executor:
             evaluations = tuple(executor.map(self._evaluate, metadata))
 
@@ -108,63 +97,54 @@ class CodexInspectionService:
             if evaluation.failed:
                 counts["failed"] += 1
                 continue
-            if evaluation.decision is None:
+            decision = evaluation.decision
+            if decision is None:
                 counts["skipped"] += 1
                 continue
 
             counts["matched"] += 1
-            counts["planned"] += 1
+            log_context = (decision.policy_id, decision.reason_code, decision.action, resource_hash(item.name))
             mutation = self._mutation_coordinator.execute_inspection(
                 item.name,
                 expected_epochs[item.name],
-                lambda: self._executor.execute(
-                    evaluation.decision,
-                    refresh_callback=evaluation.refresh_callback,
-                ),
+                lambda: self._executor.execute(decision, refresh_callback=evaluation.refresh_callback),
             )
             if mutation is None:
                 counts["skipped"] += 1
                 LOGGER.info(
-                    "event=inspection_action provider=codex policy_id=%s action=%s outcome=skipped reason_code=fast_scan_superseded resource_hash=%s",
-                    evaluation.decision.policy_id,
-                    evaluation.decision.action,
-                    _resource_hash(item.name),
+                    "event=inspection_action provider=codex policy_id=%s reason_code=fast_scan_superseded action=%s outcome=skipped resource_hash=%s",
+                    decision.policy_id,
+                    decision.action,
+                    resource_hash(item.name),
                 )
-                continue
-            if mutation.error_code is not None:
+            elif mutation.error_code is not None:
                 counts["failed"] += 1
                 LOGGER.warning(
                     "event=inspection_action provider=codex policy_id=%s reason_code=%s action=%s outcome=failed resource_hash=%s error_code=%s",
-                    evaluation.decision.policy_id,
-                    evaluation.decision.reason_code,
-                    evaluation.decision.action,
-                    _resource_hash(item.name),
+                    *log_context,
                     mutation.error_code,
                 )
-                continue
-            if mutation.applied:
+            elif mutation.applied:
                 counts["applied"] += 1
                 LOGGER.info(
                     "event=inspection_action provider=codex policy_id=%s reason_code=%s action=%s outcome=applied resource_hash=%s",
-                    evaluation.decision.policy_id,
-                    evaluation.decision.reason_code,
-                    evaluation.decision.action,
-                    _resource_hash(item.name),
+                    *log_context,
                 )
             else:
                 counts["skipped"] += 1
 
-        report = ProviderRunReport(
-            provider_id="codex",
-            phase=RunPhase.INSPECTION,
-            **counts,
-        )
-        status = RunStatus.PARTIAL_FAILURE if report.failed else RunStatus.EMPTY if not metadata else RunStatus.SUCCESS
+        report = ProviderRunReport(provider_id="codex", phase=RunPhase.INSPECTION, **counts)
+        if report.failed:
+            status = RunStatus.PARTIAL_FAILURE
+        elif metadata:
+            status = RunStatus.SUCCESS
+        else:
+            status = RunStatus.EMPTY
         return InspectionResult(status=status, reports=(report,))
 
 
 def build_codex_inspection_service(
-    cpa_api: object,
+    cpa_api: CpaApi,
     config: InspectionConfig,
     *,
     proxy: str | None,

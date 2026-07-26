@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 import tomllib
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.config.fast_scan import ConfigError, parse_config_data
 
@@ -201,6 +197,3 @@ class FastScanConfigTests(unittest.TestCase):
 
         self.assertNotIn("token-like-value-must-not-be-echoed", str(raised.exception))
 
-
-if __name__ == "__main__":
-    unittest.main()

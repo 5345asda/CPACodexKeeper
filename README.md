@@ -12,7 +12,8 @@ CPA Provider Keeper 维护 CPA 管理接口中已有的认证文件。它读取�
 - 快扫只处理 `status = "error"` 的记录。程序将上游的嵌套或扁平错误 JSON 统一为 `error.type`、`error.code` 和 `error.message`。
 - 每个 provider 的规则都在 `providers.<id>.fast_scan.rules` 中配置。规则只允许 `disable` 和 `delete`，按 `priority` 从高到低选择第一条匹配规则。
 - 启用的快扫规则会立刻写入 CPA。当前版本没有 `--apply`、plan 或 dry-run 开关；上线前可先关闭目标规则或 provider。
-- Codex 巡检使用固定生命周期行为，配置只提供周期、并发、超时、额度阈值和刷新参数。xAI 在当前版本通过快扫规则维护。
+- Codex 巡检使用固定生命周期行为，配置只提供周期、并发、超时、额度阈值和刷新参数。xAI 通过快扫规则维护。
+- 新增快扫 provider 只需在 TOML 中添加 `[providers.<type>]` 配置，代码无需改动。
 
 程序不会注册账号、创建认证文件或把 CPA token、认证文件正文写入 TOML。日志不会输出资源名、认证正文或上游错误原文。
 
@@ -60,7 +61,9 @@ cpa-keeper scan --config config.toml --env-file .env
 
 ## 日志与退出码
 
-快扫使用 `event=fast_scan_action` 与 `event=fast_scan_summary`。Codex 巡检使用 `event=inspection_detail`、`event=inspection_action` 与 `event=inspection_summary`。资源以 `resource_hash` 表示，便于关联同一记录而不泄露文件名。
+日志为结构化键值格式。快扫使用 `event=fast_scan_action` 与 `event=fast_scan_summary`，Codex 巡检使用 `event=inspection_detail`、`event=inspection_action` 与 `event=inspection_summary`。每条动作日志携带 provider、规则或 policy 标识、动作、结果和错误代码；资源以 `resource_hash` 表示，便于关联同一记录而不泄露文件名。
+
+`scan` 与 `run` 结束时按 provider 输出汇总计数：`scanned`（本轮评估的错误记录数）、`matched`（命中规则数）、`applied`（成功写入数）、`skipped`、`failed`。
 
 | 退出码 | 含义 |
 | --- | --- |
@@ -82,6 +85,16 @@ docker compose logs --tail=100 cpacodexkeeper
 
 Compose 从环境变量读取 `CPA_ENDPOINT`、`CPA_TOKEN` 和可选的 `CPA_PROXY`，只读挂载 `config.toml`。
 
+## 开发
+
+```bash
+python -m pip install -e .
+ruff check src/cpa_keeper tests
+python -m unittest discover -s tests
+```
+
+源码在 `src/cpa_keeper` 下按层组织：`config`（TOML 与连接加载）、`domain`（元数据与报表契约）、`infrastructure`（HTTP 与 CPA 客户端）、`application`（快扫、巡检、调度与写入协调）、`providers/codex`（Codex 巡检、生命周期与刷新）、`cli`（命令入口）。校验集中在系统边界：TOML 由 pydantic 解析，HTTP 响应做形状检查；内部数据类是纯数据。
+
 ## 文档
 
 - [配置指南](docs/configuration.md)
@@ -90,5 +103,3 @@ Compose 从环境变量读取 `CPA_ENDPOINT`、`CPA_TOKEN` 和可选的 `CPA_PRO
 - [运维手册](docs/operations.md)
 - [Provider 扩展](docs/providers.md)
 - [配置样例](docs/reference/config.example.toml)
-
-旧版 `main.py` 已退休，入口统一为 `cpa-keeper`。

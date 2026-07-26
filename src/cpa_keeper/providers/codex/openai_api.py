@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import time
-from types import MappingProxyType
-from typing import Mapping
 
-from cpa_keeper.infrastructure.http import CurlCffiHttpTransport, HttpTransport
+from cpa_keeper.infrastructure.http import (
+    CurlCffiHttpTransport,
+    HttpTransport,
+    request_with_retry,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class OpenAiResponse:
-    """Safe status wrapper; JSON is intentionally hidden because it may be credential material."""
+    """Status plus payload; the payload may hold credential material, so no repr."""
 
     status_code: int | None
     payload: Mapping[str, object] | None = field(default=None, repr=False)
-
-    def __post_init__(self) -> None:
-        if self.payload is not None:
-            object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
 
 
 class OpenAiApi:
@@ -40,25 +38,12 @@ class OpenAiApi:
         transport: HttpTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        if type(timeout_seconds) is not int or timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be a positive integer")
-        if type(max_retries) is not int or max_retries < 0:
-            raise ValueError("max_retries must be a non-negative integer")
         self._transport = transport or CurlCffiHttpTransport(
             proxy=proxy,
             timeout_seconds=timeout_seconds,
         )
         self._max_retries = max_retries
         self._sleep = sleep
-
-    @staticmethod
-    def _response(response: object) -> OpenAiResponse:
-        status_code = getattr(response, "status_code", None)
-        payload = getattr(response, "json_data", None)
-        return OpenAiResponse(
-            status_code=status_code if type(status_code) is int else None,
-            payload=payload if isinstance(payload, Mapping) else None,
-        )
 
     def _request(
         self,
@@ -67,21 +52,21 @@ class OpenAiApi:
         *,
         headers: Mapping[str, str],
         json_body: Mapping[str, object] | None,
-    ) -> object:
-        for attempt in range(self._max_retries + 1):
-            response = self._transport.request(
-                method,
-                url,
-                headers=headers,
-                params=None,
-                json_body=json_body,
-            )
-            status_code = getattr(response, "status_code", None)
-            if type(status_code) is int and status_code >= 500 and attempt < self._max_retries:
-                self._sleep(1)
-                continue
-            return response
-        raise AssertionError("retry loop must return a response")
+    ) -> OpenAiResponse:
+        response = request_with_retry(
+            self._transport,
+            method,
+            url,
+            headers=headers,
+            json_body=json_body,
+            max_retries=self._max_retries,
+            sleep=self._sleep,
+        )
+        payload = response.json_data
+        return OpenAiResponse(
+            status_code=response.status_code,
+            payload=payload if isinstance(payload, Mapping) else None,
+        )
 
     def check_usage(self, access_token: str, account_id: str | None) -> OpenAiResponse:
         headers = {
@@ -91,19 +76,17 @@ class OpenAiApi:
         }
         if account_id:
             headers["Chatgpt-Account-Id"] = account_id
-        return self._response(self._request("GET", self.USAGE_URL, headers=headers, json_body=None))
+        return self._request("GET", self.USAGE_URL, headers=headers, json_body=None)
 
     def refresh_token(self, refresh_token: str) -> OpenAiResponse:
-        return self._response(
-            self._request(
-                "POST",
-                self.REFRESH_URL,
-                headers={"Content-Type": "application/json"},
-                json_body={
-                    "redirect_uri": self.REDIRECT_URI,
-                    "grant_type": "refresh_token",
-                    "client_id": self.CLIENT_ID,
-                    "refresh_token": refresh_token,
-                },
-            )
+        return self._request(
+            "POST",
+            self.REFRESH_URL,
+            headers={"Content-Type": "application/json"},
+            json_body={
+                "redirect_uri": self.REDIRECT_URI,
+                "grant_type": "refresh_token",
+                "client_id": self.CLIENT_ID,
+                "refresh_token": refresh_token,
+            },
         )

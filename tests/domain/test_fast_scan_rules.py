@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import tomllib
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.application.fast_scan import normalize_error, select_rule
 from cpa_keeper.config.fast_scan import parse_config_data
@@ -119,6 +114,3 @@ class FastScanRuleTests(unittest.TestCase):
 
         self.assertEqual(selected.id if selected else None, "lower-priority-disable")
 
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import threading
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.application.mutation_coordinator import AuthFileMutationCoordinator
 from cpa_keeper.infrastructure.cpa_api import CpaOperationResult
@@ -19,7 +14,7 @@ def _success() -> CpaOperationResult:
 class AuthFileMutationCoordinatorTests(unittest.TestCase):
     def test_successful_fast_scan_invalidates_an_older_inspection_snapshot(self) -> None:
         coordinator = AuthFileMutationCoordinator()
-        expected_generation = coordinator.capture_generation("shared.json")
+        expected_generation = coordinator.snapshot_generations(("shared.json",))["shared.json"]
         inspection_calls: list[str] = []
 
         fast_scan = coordinator.execute_fast_scan("shared.json", _success)
@@ -35,7 +30,7 @@ class AuthFileMutationCoordinatorTests(unittest.TestCase):
 
     def test_failed_fast_scan_invalidates_an_older_inspection_snapshot(self) -> None:
         coordinator = AuthFileMutationCoordinator()
-        expected_generation = coordinator.capture_generation("shared.json")
+        expected_generation = coordinator.snapshot_generations(("shared.json",))["shared.json"]
 
         coordinator.execute_fast_scan(
             "shared.json",
@@ -53,7 +48,7 @@ class AuthFileMutationCoordinatorTests(unittest.TestCase):
 
     def test_unknown_fast_scan_outcome_invalidates_an_older_inspection_snapshot(self) -> None:
         coordinator = AuthFileMutationCoordinator()
-        expected_generation = coordinator.capture_generation("shared.json")
+        expected_generation = coordinator.snapshot_generations(("shared.json",))["shared.json"]
         inspection_calls: list[str] = []
 
         coordinator.execute_fast_scan(
@@ -75,7 +70,7 @@ class AuthFileMutationCoordinatorTests(unittest.TestCase):
 
     def test_fast_scan_exception_invalidates_an_older_inspection_snapshot(self) -> None:
         coordinator = AuthFileMutationCoordinator()
-        expected_generation = coordinator.capture_generation("shared.json")
+        expected_generation = coordinator.snapshot_generations(("shared.json",))["shared.json"]
         inspection_calls: list[str] = []
 
         def fail() -> CpaOperationResult:
@@ -95,7 +90,7 @@ class AuthFileMutationCoordinatorTests(unittest.TestCase):
 
     def test_same_resource_fast_scan_waits_for_an_inflight_inspection_write(self) -> None:
         coordinator = AuthFileMutationCoordinator()
-        expected_generation = coordinator.capture_generation("shared.json")
+        expected_generation = coordinator.snapshot_generations(("shared.json",))["shared.json"]
         inspection_started = threading.Event()
         release_inspection = threading.Event()
         fast_scan_done = threading.Event()
@@ -136,7 +131,7 @@ class AuthFileMutationCoordinatorTests(unittest.TestCase):
 
     def test_different_resources_do_not_share_a_mutation_lock(self) -> None:
         coordinator = AuthFileMutationCoordinator()
-        expected_generation = coordinator.capture_generation("inspection.json")
+        expected_generation = coordinator.snapshot_generations(("inspection.json",))["inspection.json"]
         inspection_started = threading.Event()
         release_inspection = threading.Event()
         fast_scan_done = threading.Event()
@@ -173,12 +168,12 @@ class AuthFileMutationCoordinatorTests(unittest.TestCase):
         snapshot = coordinator.snapshot_generations(("codex.json", "xai.json"))
 
         self.assertEqual(dict(snapshot), {"codex.json": 0, "xai.json": 0})
-        self.assertEqual(coordinator.capture_generation("other.json"), 0)
+        self.assertEqual(coordinator.snapshot_generations(("other.json",))["other.json"], 0)
         self.assertEqual(coordinator._states, {})
 
     def test_snapshot_generations_does_not_wait_for_an_inflight_inspection_write(self) -> None:
         coordinator = AuthFileMutationCoordinator()
-        expected_generation = coordinator.capture_generation("inspection.json")
+        expected_generation = coordinator.snapshot_generations(("inspection.json",))["inspection.json"]
         inspection_started = threading.Event()
         release_inspection = threading.Event()
         snapshot_done = threading.Event()
@@ -212,6 +207,3 @@ class AuthFileMutationCoordinatorTests(unittest.TestCase):
         inspection_thread.join(timeout=1)
         snapshot_thread.join(timeout=1)
 
-
-if __name__ == "__main__":
-    unittest.main()

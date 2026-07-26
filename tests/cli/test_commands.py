@@ -3,13 +3,8 @@ from __future__ import annotations
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import logging
-from pathlib import Path
-import sys
 import unittest
 from unittest.mock import patch
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cpa_keeper.application.results import FastScanResult, MaintenanceResult, RunStatus
 from cpa_keeper.cli.commands import main
@@ -139,6 +134,3 @@ class CliCommandTests(unittest.TestCase):
             stream=stdout,
         )
 
-
-if __name__ == "__main__":
-    unittest.main()

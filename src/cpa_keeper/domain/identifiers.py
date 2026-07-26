@@ -1,15 +1,10 @@
-"""Stable identifiers used in configuration, reports, and safe logs."""
+"""Log-safe resource identification."""
 
 from __future__ import annotations
 
-import re
+from hashlib import sha256
 
 
-_IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
-
-
-def validate_stable_identifier(value: object, field_name: str) -> str:
-    """Accept lowercase identifiers that are safe to report verbatim."""
-    if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
-        raise ValueError(f"{field_name} must be a lowercase stable identifier")
-    return value
+def resource_hash(name: str) -> str:
+    """Short stable hash so logs can correlate a resource without naming it."""
+    return sha256(name.encode()).hexdigest()[:12]

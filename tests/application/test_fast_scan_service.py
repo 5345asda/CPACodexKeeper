@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import tomllib
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.application.fast_scan import FastScanService
 from cpa_keeper.application.mutation_coordinator import AuthFileMutationCoordinator
@@ -212,6 +207,3 @@ class FastScanServiceTests(unittest.TestCase):
             },
         )
 
-
-if __name__ == "__main__":
-    unittest.main()

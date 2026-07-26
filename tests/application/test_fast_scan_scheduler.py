@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import tomllib
 import threading
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from cpa_keeper.application.fast_scan_scheduler import FastScanScheduler
 from cpa_keeper.application.results import FastScanResult, InspectionResult, MaintenanceResult, RunStatus
@@ -133,6 +128,3 @@ class FastScanSchedulerTests(unittest.TestCase):
         inspection_thread.join(timeout=1)
         self.assertTrue(inspection_done.is_set())
 
-
-if __name__ == "__main__":
-    unittest.main()

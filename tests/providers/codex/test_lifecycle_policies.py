@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import unittest
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from cpa_keeper.domain.auth_files import AuthFileMetadata
 from cpa_keeper.providers.codex.inspector import CodexInspectionFacts, ExpiryState
@@ -105,6 +100,3 @@ class CodexLifecyclePolicyTests(unittest.TestCase):
 
         self.assertIsNone(self.evaluator.evaluate(facts))
 
-
-if __name__ == "__main__":
-    unittest.main()

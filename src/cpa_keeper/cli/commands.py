@@ -8,15 +8,25 @@ import logging
 from pathlib import Path
 import sys
 import time
+from typing import TYPE_CHECKING
 
 from cpa_keeper import __version__
+
+if TYPE_CHECKING:
+    from cpa_keeper.application.fast_scan import FastScanService
+    from cpa_keeper.application.fast_scan_scheduler import FastScanScheduler
+    from cpa_keeper.application.results import InspectionResult
+    from cpa_keeper.config.loader import LoadedRuntimeConfig
+    from cpa_keeper.domain.reports import ProviderRunReport
 
 
 LOGGER = logging.getLogger(__name__)
 
+# Runtime imports stay inside functions so `--help` and `--version` never load
+# configuration, HTTP clients, or provider code.
+
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the small command surface without loading runtime configuration."""
     parser = argparse.ArgumentParser(
         prog="cpa-keeper",
         description="Configured fast scanning for CPA management APIs.",
@@ -40,17 +50,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_config(args: argparse.Namespace):
+def _load_config(args: argparse.Namespace) -> LoadedRuntimeConfig:
     from cpa_keeper.config.loader import load_runtime_config
 
     return load_runtime_config(config_path=args.config, env_file=args.env_file)
 
 
-def _print_reports(reports: Sequence[object]) -> None:
+def _print_reports(reports: Sequence[ProviderRunReport]) -> None:
     for report in reports:
         print(
             f"provider={report.provider_id} scanned={report.scanned} "
-            f"matched={report.matched} planned={report.planned} applied={report.applied} "
+            f"matched={report.matched} applied={report.applied} "
             f"skipped={report.skipped} failed={report.failed}"
         )
 
@@ -67,7 +77,7 @@ def _exit_code(status: object) -> int:
     return 4
 
 
-def _build_inspection_callback(runtime: object, cpa_api: object, mutation_coordinator: object):
+def _build_inspection_callback(runtime: LoadedRuntimeConfig, cpa_api: object, mutation_coordinator: object):
     """Build Codex inspection directly from the active TOML runtime settings."""
     from cpa_keeper.application.inspection_service import build_codex_inspection_service
 
@@ -82,7 +92,7 @@ def _build_inspection_callback(runtime: object, cpa_api: object, mutation_coordi
         mutation_coordinator=mutation_coordinator,
     )
 
-    def inspect(_provider_id: str, snapshot: object) -> None:
+    def inspect(_provider_id: str, snapshot: object) -> InspectionResult:
         metadata = tuple(
             item
             for item in snapshot.metadata
@@ -93,11 +103,10 @@ def _build_inspection_callback(runtime: object, cpa_api: object, mutation_coordi
         duration_ms = round((time.monotonic() - started) * 1000)
         for report in result.reports:
             LOGGER.info(
-                "event=inspection_summary provider=%s scanned=%s matched=%s planned=%s applied=%s skipped=%s failed=%s duration_ms=%s",
+                "event=inspection_summary provider=%s scanned=%s matched=%s applied=%s skipped=%s failed=%s duration_ms=%s",
                 report.provider_id,
                 report.scanned,
                 report.matched,
-                report.planned,
                 report.applied,
                 report.skipped,
                 report.failed,
@@ -108,7 +117,7 @@ def _build_inspection_callback(runtime: object, cpa_api: object, mutation_coordi
     return inspect
 
 
-def _build_services(runtime: object):
+def _build_services(runtime: LoadedRuntimeConfig) -> tuple[FastScanService, FastScanScheduler]:
     from cpa_keeper.application.fast_scan import FastScanService
     from cpa_keeper.application.fast_scan_scheduler import FastScanScheduler
     from cpa_keeper.application.mutation_coordinator import AuthFileMutationCoordinator
