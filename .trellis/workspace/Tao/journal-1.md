@@ -39,3 +39,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Migrate Keeper to CPA v8 management API
+
+**Date**: 2026-10-21
+**Task**: Migrate Keeper to CPA v8 management API
+**Branch**: `codex/cpa-v8-management-api`
+
+### Summary
+
+Migrated the Keeper client to direct CPA v8 credential routes without fallback, verified the v8 contract, built and transferred a linux/amd64 image, and released only the Keeper service on racknerd23 with a verified rollback compose backup.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3444666f8843398266819602ca639052a93d56e5` | (see git log) |
+| `f5bace37feb27383fc5fb31f601e488f3a7d7ed3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
