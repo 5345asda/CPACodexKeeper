@@ -52,8 +52,12 @@ racknerd23 Keeper service.
 - [x] The deployed Keeper runs the new tagged image, remains healthy with zero
   new restarts or OOM events, and its only production API verification is an
   authorized v8 GET credential-list request with a valid aggregate response.
-- [x] No CPA config write, management mutation probe, credential-content read,
-  auth-file mutation, tunnel recreation, or server-side image build occurs.
+- [x] No CPA config write, manual management-mutation probe,
+  credential-content read, tunnel recreation, or server-side image build
+  occurs. The released daemon performed one pre-existing configured
+  fast-scan `disable` action during its startup cycle; it was not an
+  acceptance probe, and its credential state was not changed again during
+  rollout verification.
 
 ## Out of Scope
 

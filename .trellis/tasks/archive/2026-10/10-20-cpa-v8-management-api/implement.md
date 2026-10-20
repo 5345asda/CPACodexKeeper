@@ -48,4 +48,7 @@ test.
 - The CPA container remained running; public `healthz` returned `200`, while
   unauthenticated `/v1/models` returned `401`. No CPA configuration write,
   explicit credential mutation probe, tunnel change, dependency restart, or
-  server-side image build occurred during rollout.
+  server-side image build occurred during rollout. The newly started daemon
+  did execute its pre-existing configured fast-scan cycle once and recorded
+  one successful Codex `disable` action; it was not reverted because doing so
+  would alter a live credential state outside the release scope.
