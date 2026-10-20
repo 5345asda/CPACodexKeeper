@@ -73,3 +73,36 @@ Migrated the Keeper client to direct CPA v8 credential routes without fallback, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Clarify daemon startup side effect
+
+**Date**: 2026-10-21
+**Task**: Clarify daemon startup side effect
+**Branch**: `codex/cpa-v8-management-api`
+
+### Summary
+
+Corrected the archived rollout evidence to record the one pre-existing configured fast-scan disable action that ran on daemon startup; no manual mutation probe or additional credential mutation was performed.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1d4ef59` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

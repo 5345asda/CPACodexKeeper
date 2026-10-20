@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 2
+- **Total Sessions**: 3
 - **Last Active**: 2026-10-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~75 | Active |
+| `journal-1.md` | ~108 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 3 | 2026-10-21 | Clarify daemon startup side effect | `1d4ef59` | `codex/cpa-v8-management-api` |
 | 2 | 2026-10-21 | Migrate Keeper to CPA v8 management API | `3444666f8843398266819602ca639052a93d56e5`, `f5bace37feb27383fc5fb31f601e488f3a7d7ed3` | `codex/cpa-v8-management-api` |
 | 1 | 2026-07-26 | v0 运行时移除与去防御性重构 | `77caa9c`, `17217a7` | `codex/provider-fast-scan-refactor` |
 <!-- @@@/auto:session-history -->
