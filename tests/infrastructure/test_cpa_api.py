@@ -36,7 +36,7 @@ class CpaApiContractTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["method"], "GET")
         self.assertEqual(
             transport.calls[0]["url"],
-            "https://cpa.example.test/v0/management/auth-files",
+            "https://cpa.example.test/v8/management/credentials",
         )
 
     def test_list_and_detail_requests_validate_cpa_response_shape(self) -> None:
@@ -75,14 +75,14 @@ class CpaApiContractTests(unittest.TestCase):
         self.assertEqual(detail.payload, {"access_token": "opaque"})
         self.assertEqual(
             transport.calls[1]["url"],
-            "https://cpa.example.test/v0/management/auth-files/download",
+            "https://cpa.example.test/v8/management/credentials/download",
         )
         self.assertEqual(transport.calls[1]["params"], {"name": "redacted-xai.json"})
 
     def test_delete_status_patch_and_upload_use_the_cpa_management_contract(self) -> None:
         transport = FakeTransport(
             [
-                HttpResponse(status_code=204),
+                HttpResponse(status_code=200),
                 HttpResponse(status_code=200),
                 HttpResponse(status_code=200),
             ]
@@ -103,7 +103,7 @@ class CpaApiContractTests(unittest.TestCase):
             [
                 {
                     "method": "DELETE",
-                    "url": "https://cpa.example.test/v0/management/auth-files",
+                    "url": "https://cpa.example.test/v8/management/credentials",
                     "headers": {
                         "Authorization": "Bearer test-token",
                         "Accept": "application/json",
@@ -114,7 +114,7 @@ class CpaApiContractTests(unittest.TestCase):
                 },
                 {
                     "method": "PATCH",
-                    "url": "https://cpa.example.test/v0/management/auth-files/status",
+                    "url": "https://cpa.example.test/v8/management/credentials/status",
                     "headers": {
                         "Authorization": "Bearer test-token",
                         "Accept": "application/json",
@@ -125,7 +125,7 @@ class CpaApiContractTests(unittest.TestCase):
                 },
                 {
                     "method": "POST",
-                    "url": "https://cpa.example.test/v0/management/auth-files",
+                    "url": "https://cpa.example.test/v8/management/credentials",
                     "headers": {
                         "Authorization": "Bearer test-token",
                         "Accept": "application/json",
@@ -136,4 +136,19 @@ class CpaApiContractTests(unittest.TestCase):
                 },
             ],
         )
+
+    def test_v8_write_contract_does_not_accept_legacy_delete_status(self) -> None:
+        transport = FakeTransport([HttpResponse(status_code=204)])
+        api = CpaApi(
+            endpoint="https://cpa.example.test",
+            token="test-token",
+            transport=transport,
+            max_retries=0,
+        )
+
+        result = api.delete_auth_file("redacted.json")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status_code, 204)
+        self.assertEqual(result.error_code, "http_204")
 

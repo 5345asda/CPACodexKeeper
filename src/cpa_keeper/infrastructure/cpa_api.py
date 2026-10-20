@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 
 from .http import CurlCffiHttpTransport, HttpResponse, HttpTransport, request_with_retry
 
+_CREDENTIALS_PATH = "/v8/management/credentials"
+_CREDENTIAL_DOWNLOAD_PATH = f"{_CREDENTIALS_PATH}/download"
+_CREDENTIAL_STATUS_PATH = f"{_CREDENTIALS_PATH}/status"
+
 
 @dataclass(frozen=True, slots=True)
 class CpaOperationResult:
@@ -95,10 +99,9 @@ class CpaApi:
         *,
         params: Mapping[str, str] | None = None,
         json_body: Mapping[str, object] | None = None,
-        ok_statuses: frozenset[int] = frozenset({200}),
     ) -> CpaOperationResult:
         response = self._request(method, path, params=params, json_body=json_body)
-        ok = response.status_code in ok_statuses
+        ok = response.status_code == 200
         return CpaOperationResult(
             ok=ok,
             status_code=response.status_code,
@@ -106,7 +109,7 @@ class CpaApi:
         )
 
     def list_auth_files(self) -> CpaListResult:
-        response = self._request("GET", "/v0/management/auth-files")
+        response = self._request("GET", _CREDENTIALS_PATH)
         if response.status_code != 200:
             return CpaListResult(ok=False, error_code=_failure_code(response))
         payload = response.json_data
@@ -127,7 +130,7 @@ class CpaApi:
     def get_auth_file(self, name: str) -> CpaAuthFileResult:
         response = self._request(
             "GET",
-            "/v0/management/auth-files/download",
+            _CREDENTIAL_DOWNLOAD_PATH,
             params={"name": name},
         )
         if response.status_code != 200:
@@ -139,22 +142,21 @@ class CpaApi:
     def delete_auth_file(self, name: str) -> CpaOperationResult:
         return self._write(
             "DELETE",
-            "/v0/management/auth-files",
+            _CREDENTIALS_PATH,
             params={"name": name},
-            ok_statuses=frozenset({200, 204}),
         )
 
     def set_disabled(self, name: str, disabled: bool) -> CpaOperationResult:
         return self._write(
             "PATCH",
-            "/v0/management/auth-files/status",
+            _CREDENTIAL_STATUS_PATH,
             json_body={"name": name, "disabled": disabled},
         )
 
     def upload_auth_file(self, name: str, payload: Mapping[str, object]) -> CpaOperationResult:
         return self._write(
             "POST",
-            "/v0/management/auth-files",
+            _CREDENTIALS_PATH,
             params={"name": name},
             json_body=payload,
         )

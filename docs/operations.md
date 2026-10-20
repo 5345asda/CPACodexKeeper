@@ -7,7 +7,7 @@ cpa-keeper config validate --config config.toml --env-file .env
 cpa-keeper doctor --config config.toml --env-file .env
 ```
 
-快扫规则会直接写 CPA。首次部署或变更删除规则时，先关闭目标 rule 或 provider，确认配置、日志和 CPA 列表类型后再启用。
+快扫规则会直接通过 CPA v8 凭据管理接口写 CPA。首次部署或变更删除规则时，先关闭目标 rule 或 provider，确认配置、日志和 CPA 列表类型后再启用。
 
 ## 单次运行与守护进程
 
@@ -41,7 +41,7 @@ docker compose logs --tail=100 cpacodexkeeper
 | `inspection_action` | Codex 生命周期写入结果。 |
 | `inspection_summary` | Codex 巡检汇总。 |
 
-遇到 `resource_hash` 时，使用同一轮 CPA 列表在受控环境中关联记录。不要将认证文件正文粘贴到日志或工单。
+遇到 `resource_hash` 时，使用同一轮 CPA v8 凭据列表在受控环境中关联记录。不要将凭据正文粘贴到日志或工单。
 
 ## 常见故障
 

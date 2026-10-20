@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/index.md","reason":"Full backend quality gate for the API migration."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review response shape and stable failure handling."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review no-fallback implementation and test coverage."}
+{"file":".trellis/tasks/10-20-cpa-v8-management-api/research/v8-management-contract.md","reason":"Check implementation against the verified direct v8 contract."}

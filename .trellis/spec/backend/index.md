@@ -23,6 +23,7 @@
 | [Directory Structure](./directory-structure.md) | 分层布局、依赖方向、provider 扩展方式 | Filled |
 | [Database Guidelines](./database-guidelines.md) | 本项目无数据库；说明状态存放位置 | Filled |
 | [Error Handling](./error-handling.md) | 边界校验、error code 约定、退出码映射 | Filled |
+| [CPA v8 Management API](./cpa-v8-management-api.md) | 凭据管理路由、响应契约与禁止回退规则 | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | 禁止防御性编程、ruff 配置、测试要求 | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | 结构化 event 日志、敏感信息边界 | Filled |
 

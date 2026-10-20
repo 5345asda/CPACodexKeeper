@@ -4,7 +4,7 @@
 
 [中文](README.md)
 
-CPA Provider Keeper maintains existing auth files through a CPA management API. A single global list read feeds configurable provider fast-scan rules, while Codex uses a separate quota, expiry, and refresh inspection.
+CPA Provider Keeper maintains existing credentials through the CPA v8 management API. A single global list read feeds configurable provider fast-scan rules, while Codex uses a separate quota, expiry, and refresh inspection.
 
 ## Behavior
 
@@ -15,7 +15,7 @@ CPA Provider Keeper maintains existing auth files through a CPA management API. 
 - Codex inspection has fixed lifecycle behavior. Its TOML section contains only runtime parameters: interval, workers, timeout, quota threshold, and refresh settings. xAI is maintained through fast-scan rules.
 - Adding a fast-scan provider takes only a new `[providers.<type>]` TOML section, with no code changes.
 
-The program never registers accounts, creates auth files, or stores CPA tokens and auth-file bodies in TOML. Logs never contain resource names, credential bodies, or raw upstream error text.
+The program never registers accounts, creates credentials, or stores CPA tokens and credential bodies in TOML. Logs never contain resource names, credential bodies, or raw upstream error text.
 
 ## Quick Start
 

@@ -4,7 +4,7 @@
 timeout_seconds = 30
 max_retries = 2
 
-# One CPA auth-file list read serves every provider fast scan.
+# One CPA v8 credential list read serves every provider fast scan.
 [fast_scan]
 interval_seconds = 60
 

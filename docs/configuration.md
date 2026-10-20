@@ -21,7 +21,7 @@ cp docs/reference/config.example.toml config.toml
 interval_seconds = 60
 ```
 
-每个周期只读取一次 CPA 认证文件列表。所有启用 provider 的快扫规则共享这个列表快照。
+每个周期只读取一次 CPA v8 `/v8/management/credentials` 列表。所有启用 provider 的快扫规则共享这个列表快照。
 
 ## Provider 快扫
 
@@ -42,7 +42,7 @@ when = { all = [
 ] }
 ```
 
-`providers.<id>` 的名称必须与 CPA 列表中的 `type` 对应。provider 无需 Python 注册表或静态 policy 声明，新增快扫 provider 只需增加 TOML 配置。
+`providers.<id>` 的名称必须与 CPA v8 凭据列表中的 `type` 对应。provider 无需 Python 注册表或静态 policy 声明，新增快扫 provider 只需增加 TOML 配置。
 
 规则字段：
 

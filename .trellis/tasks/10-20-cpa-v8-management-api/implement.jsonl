@@ -1,0 +1,7 @@
+{"file":".trellis/spec/guides/index.md","reason":"Required cross-layer thinking guidance for an API contract change."}
+{"file":".trellis/spec/backend/index.md","reason":"Backend pre-development checklist and quality gate."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Keep the v8 client change in the infrastructure layer."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve stable HTTP result error codes and boundary validation."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required test, lint, and no-fallback coding conventions."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Ensure API errors and release diagnostics remain secret-safe."}
+{"file":".trellis/tasks/10-20-cpa-v8-management-api/research/v8-management-contract.md","reason":"Verified v8 endpoint paths and response semantics used by implementation."}

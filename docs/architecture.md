@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart LR
-    A[CPA auth-file list] --> B[normalize error]
+    A[CPA v8 credential list] --> B[normalize error]
     B --> C[provider TOML rules]
     C --> D[disable or delete]
     A --> E[Codex snapshot]

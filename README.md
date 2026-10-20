@@ -4,7 +4,7 @@
 
 [English](README.en.md)
 
-CPA Provider Keeper 维护 CPA 管理接口中已有的认证文件。它读取全局列表，按 TOML 规则处理错误记录，并为 Codex 执行独立的额度、有效期和刷新巡检。
+CPA Provider Keeper 通过 CPA v8 凭据管理接口维护已有凭据。它读取全局列表，按 TOML 规则处理错误记录，并为 Codex 执行独立的额度、有效期和刷新巡检。
 
 ## 工作方式
 
@@ -15,7 +15,7 @@ CPA Provider Keeper 维护 CPA 管理接口中已有的认证文件。它读取�
 - Codex 巡检使用固定生命周期行为，配置只提供周期、并发、超时、额度阈值和刷新参数。xAI 通过快扫规则维护。
 - 新增快扫 provider 只需在 TOML 中添加 `[providers.<type>]` 配置，代码无需改动。
 
-程序不会注册账号、创建认证文件或把 CPA token、认证文件正文写入 TOML。日志不会输出资源名、认证正文或上游错误原文。
+程序不会注册账号、创建凭据或把 CPA token、凭据正文写入 TOML。日志不会输出资源名、凭据正文或上游错误原文。
 
 ## 快速开始
 
