@@ -39,20 +39,20 @@ racknerd23 Keeper service.
 
 ## Acceptance Criteria
 
-- [ ] No production source or test references to `/v0/management/auth-files`
+- [x] No production source or test references to `/v0/management/auth-files`
   remain outside historical documents.
-- [ ] The infrastructure client uses `/v8/management/credentials`,
+- [x] The infrastructure client uses `/v8/management/credentials`,
   `/v8/management/credentials/download`, and
   `/v8/management/credentials/status` with the documented request semantics.
-- [ ] Unit tests prove the exact methods, paths, parameters, JSON bodies, and
+- [x] Unit tests prove the exact methods, paths, parameters, JSON bodies, and
   successful status handling for all five operations.
-- [ ] The full lint, unit-test, compile, package, Compose, and local image
+- [x] The full lint, unit-test, compile, package, Compose, and local image
   smoke checks pass.
-- [ ] A task-scoped commit is pushed to the remote branch.
-- [ ] The deployed Keeper runs the new tagged image, remains healthy with zero
+- [x] A task-scoped commit is pushed to the remote branch.
+- [x] The deployed Keeper runs the new tagged image, remains healthy with zero
   new restarts or OOM events, and its only production API verification is an
   authorized v8 GET credential-list request with a valid aggregate response.
-- [ ] No CPA config write, management mutation probe, credential-content read,
+- [x] No CPA config write, management mutation probe, credential-content read,
   auth-file mutation, tunnel recreation, or server-side image build occurs.
 
 ## Out of Scope
